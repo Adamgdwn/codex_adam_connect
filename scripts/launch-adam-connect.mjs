@@ -2,8 +2,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+dotenv.config({ path: path.resolve(repoRoot, ".env") });
+
 const shouldOpenBrowser = !process.argv.includes("--no-open");
 const gatewayPort = Number(process.env.GATEWAY_PORT ?? 43111);
 const dashboardUrl = `http://127.0.0.1:${gatewayPort}/`;

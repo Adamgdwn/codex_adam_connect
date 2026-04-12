@@ -136,7 +136,6 @@ const server = createServer(async (req, res) => {
       res.statusCode = 200;
       res.setHeader("content-type", "application/vnd.android.package-archive");
       res.setHeader("content-length", String(artifact.sizeBytes));
-      res.setHeader("content-disposition", `attachment; filename="${artifact.fileName}"`);
       createReadStream(artifact.filePath).pipe(res);
       return;
     }

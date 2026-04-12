@@ -127,6 +127,14 @@ If you want a transferable Android APK from this desktop, you still need a local
 - Android SDK / platform tools
 - a successful Gradle build under `apps/mobile/android`
 
+For a phone-installable APK, run:
+
+```bash
+npm run build:android-release
+```
+
+`npm run build:android-debug` remains useful for Metro-based local development, but the dashboard download should prefer the release APK.
+
 ## 6) Pair And Chat
 
 1. enter the desktop URL reachable from your phone

@@ -13,6 +13,7 @@
     "app:desktop:start": "npm run launch:no-open",
     "app:desktop:install-launcher": "node scripts/install-linux-launcher.mjs",
     "build:android-debug": "bash scripts/build-android-debug.sh",
+    "build:android-release": "bash scripts/build-android-release.sh",
     "launch": "node scripts/launch-adam-connect.mjs",
     "launch:no-open": "node scripts/launch-adam-connect.mjs --no-open",
     "typecheck": "node ./node_modules/typescript/bin/tsc -b tsconfig.json --pretty false && npm run typecheck --workspace @adam-connect/mobile",

@@ -8,8 +8,8 @@ import type { ChatSession, DesktopOverviewResponse, GatewayOverview } from "@ada
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 const defaultArtifactCandidates = [
-  "apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk",
-  "apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+  "apps/mobile/android/app/build/outputs/apk/release/app-release.apk",
+  "apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
 ];
 
 interface AndroidArtifact {

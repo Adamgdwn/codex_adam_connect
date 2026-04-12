@@ -30,11 +30,13 @@ npm run launch
 
 - If you want the lower-level terminal-only mode instead, you can still use `npm run dev:desktop-stack`.
 
-- For Android APK builds from this desktop, use:
+- For an installable Android APK from this desktop, use:
 
 ```bash
-npm run build:android-debug
+npm run build:android-release
 ```
+
+- `build:android-debug` is still useful for local Metro-based development, but it is not the right artifact for phone install from the dashboard.
 
 ## Quick Flow
 
@@ -60,6 +62,7 @@ flowchart TD
 3. Open the phone install page from that dashboard, or scan the QR code.
 4. On the phone, visit the Tailscale install page URL shown there if you did not scan.
 5. Tap `Download Android APK`.
+   The dashboard should serve a release APK when one exists.
 6. If Android warns about installing from the browser, allow that browser as an install source.
 7. Finish the app install and open Adam Connect.
 
@@ -103,7 +106,8 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 - If the app says Codex is logged out, run `codex login --device-auth` on the desktop.
 - If the Android APK download works but installation is blocked, allow installs from the browser you used to download it.
 - If the phone pairs but replies do not appear, check the terminal running `npm run launch`.
-- If you need to rebuild the Android package after code changes, rerun `npm run build:android-debug`.
+- If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
+- If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use
 

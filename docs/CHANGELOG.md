@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- fixed `npm run launch` so it loads `.env` before registering approved roots
+- added a release Android build path and made the dashboard prefer `app-release.apk` for phone installs
+- removed forced APK attachment headers so Android browsers can hand off to the installer more directly
+- switched the Android app back to the classic host bootstrap path for better release-launch stability
 - replaced the demo `summarize_file` slice with paired chat sessions for the local Codex CLI
 - added gateway websocket streaming for host status, sessions, and message deltas
 - added a desktop Codex app-server bridge with login-state reporting
