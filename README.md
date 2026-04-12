@@ -13,10 +13,13 @@ See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATU
 - the dashboard now shows pairing code, Tailscale status, recent sessions, recent devices, QR onboarding, and Android APK download links
 - `npm run launch` starts the local services and opens the dashboard automatically
 - `npm run app:desktop:install-launcher` installs a Linux desktop-menu launcher that points at the supported browser dashboard flow
+- the phone keeps a default `Operator` chat path for quick remote turns
+- pairing codes stay stable across normal desktop restarts, and stale phone tokens can enter a repair flow instead of a full cold start
 
 ### Next
 
-- validate the browser dashboard plus phone flow on a real device end to end again after this checkpoint
+- validate the operator loop on a real phone end to end again after this checkpoint
+- keep improving voice send/reply behavior, readable chat output, and shared phone/desktop recovery messaging
 - either finish promoting the Electron desktop-shell scaffold into a supported launch path or remove it if the browser-first experience stays better
 - validate iOS packaging and real-device behavior
 - harden packaging, release, and smoke coverage around the desktop surface
@@ -32,7 +35,8 @@ See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATU
 1. the desktop host starts and registers itself with the gateway
 2. the desktop host generates a pairing code
 3. the phone pairs with that code and receives a long-lived device token
-4. the phone creates chat sessions scoped to approved desktop roots
+4. the phone repairs or reconnects using that saved URL plus token when possible
+5. the phone uses a default `Operator` chat or creates named chats scoped to approved desktop roots
 5. the phone sends text or voice-transcribed text
 6. the desktop host relays that turn to the local Codex app-server
 7. the gateway streams host status, session updates, and assistant message deltas back to the phone
@@ -55,5 +59,7 @@ See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATU
 - run the mobile app from `apps/mobile`
 
 If you set `GATEWAY_ANDROID_APK_PATH` to a built APK, the desktop dashboard exposes a direct Android download plus a scannable QR code for the phone. The old lower-level startup path still exists as `npm run dev:desktop-stack` if you want raw terminal control.
+
+The current product priority is to make the phone feel like a persistent remote operator console for Codex rather than a thin remote terminal.
 
 Use [START_HERE.md](/home/adamgoodwin/code/agents/codex_adam_connect/START_HERE.md) for the exact setup and validation order.

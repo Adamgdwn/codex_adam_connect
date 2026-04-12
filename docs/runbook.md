@@ -6,17 +6,19 @@ Operate the local gateway and desktop host so a paired phone can chat with the l
 
 ## Common Failures
 
-- `Pairing code not found`: restart the desktop host and use the new pairing code
+- `Pairing code not found`: verify the typed code first, then restart the desktop host only if the saved code is genuinely stale
 - `Codex is not logged in`: run `codex login --device-auth`
 - mobile websocket disconnects: verify the desktop URL, `GATEWAY_HOST`, and Tailscale path
 - session stuck in `running`: inspect desktop host logs and restart the host if the local app-server exited
+- `This phone needs to repair its desktop link`: keep the saved desktop URL, then reconnect with the stable pairing code instead of doing a full disconnect-first setup
 
 ## Recovery
 
 1. restart `npm run launch`
 2. verify `codex login status`
 3. refresh the mobile app
-4. if needed, disconnect and pair again
+4. if the phone enters repair mode, reconnect using the saved desktop URL and pairing code
+5. only fall back to a full disconnect and re-pair if repair does not recover the link
 
 ## Dependencies
 
@@ -35,5 +37,5 @@ Operate the local gateway and desktop host so a paired phone can chat with the l
 
 ### Next
 
-- capture one more full real-device recovery drill using the dashboard flow
+- capture one more full real-device recovery drill using the operator loop
 - decide whether the native-shell scaffold becomes part of operations or stays internal

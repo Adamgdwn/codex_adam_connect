@@ -2,16 +2,18 @@
 
 ## Now
 
-- stabilize paired phone to local Codex chat
-- validate the dashboard-first desktop GUI on a real phone again
-- harden tests and smoke coverage around the new chat flow
-- choose whether the Electron desktop-shell scaffold should be promoted or retired
+- make Adam Connect feel like a persistent remote operator console for desktop Codex
+- harden pairing persistence and recovery so the phone stays usable across normal desktop restarts
+- make the default `Operator` chat the low-friction path for quick voice and text turns
+- improve voice/TTS reliability, visible state, and safe send behavior
+- improve shared phone/desktop status, retry messaging, and chat readability
+- reduce monolith risk in the mobile UI by stopping further growth of `apps/mobile/src/app/AppShell.tsx`
 
 ## Next
 
+- add richer chat readability and management features: previews, timestamps, search, and clearer empty states
 - add richer host settings and reconnect flows
-- improve voice UX and transcript handling
-- add better session history and root selection UX
+- improve transcript quality, confirmation for risky voice-send behavior, and TTS cleanup
 - finish iOS build validation and packaging
 
 ## Later
@@ -26,8 +28,11 @@
 
 - browser dashboard became the supported desktop GUI
 - one-command launch and Linux launcher install path landed
+- the phone now has persistent pairing tokens, a stable restart-safe pairing code, and a default `Operator` chat path
+- the desktop and phone share richer session/status recovery behavior than the original MVP
 
 ### Coming Next
 
-- real-device validation against the new dashboard flow
-- desktop-surface decision between browser-first and native-shell
+- complete one more real-phone acceptance pass focused on the operator loop
+- tighten voice send/reply behavior so the phone feels like a natural coworker console
+- break up the largest mixed-purpose mobile UI/state files while preserving current behavior

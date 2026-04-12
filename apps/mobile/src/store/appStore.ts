@@ -7,11 +7,21 @@ import { TtsService } from "../services/voice/ttsService";
 import { VoiceService } from "../services/voice/voiceService";
 import { normalizeBaseUrl, websocketUrlFromBase } from "../config";
 import { DEFAULT_BASE_URL } from "../generated/runtimeConfig";
+import {
+  findOperatorSession,
+  isPairingRepairErrorMessage,
+  isSessionBusy,
+  OPERATOR_SESSION_TITLE,
+  pairingRepairMessage,
+  pickPreferredSessionId,
+  requiresVoiceReview,
+  sortSessionsForDisplay
+} from "../utils/operatorConsole";
 
 type View = "host" | "sessions" | "chat";
 type EditableField = "baseUrl" | "deviceName" | "pairingCode" | "composer" | "newSessionRootPath" | "newSessionTitle";
 
-interface AppState {
+export interface AppState {
   booting: boolean;
   refreshing: boolean;
   realtimeConnected: boolean;
@@ -33,6 +43,7 @@ interface AppState {
   voiceAvailable: boolean;
   listening: boolean;
   lastSpokenMessageId: string | null;
+  notice: string | null;
   error: string | null;
   bootstrap(): Promise<void>;
   connectPairing(): Promise<void>;
@@ -79,6 +90,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   voiceAvailable: false,
   listening: false,
   lastSpokenMessageId: null,
+  notice: null,
   error: null,
   async bootstrap() {
     const [settings, token, voiceAvailable] = await Promise.all([
@@ -95,6 +107,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       token,
       voiceAvailable,
       realtimeConnected: false,
+      notice: token ? "Restoring the saved desktop link." : null,
       booting: false
     });
 
@@ -137,6 +150,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         pairingCode: "",
         newSessionRootPath: paired.host.approvedRoots[0] ?? "",
         realtimeConnected: false,
+        notice: "Phone paired. The Operator chat will be ready for quick turns.",
         view: "host"
       });
       connectSocket(baseUrl, paired.deviceToken, set, get);
@@ -167,6 +181,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       renameDraftBySession: {},
       autoSendVoice: true,
       lastSpokenMessageId: null,
+      notice: null,
       refreshing: false,
       realtimeConnected: false,
       error: null,
@@ -187,13 +202,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set({
         hostStatus,
-        sessions,
+        sessions: sortSessionsForDisplay(sessions),
         selectedSessionId: nextSelected,
         newSessionRootPath: get().newSessionRootPath || hostStatus.host.approvedRoots[0] || "",
         renameDraftBySession: sessions.reduce<Record<string, string>>((accumulator, session) => {
           accumulator[session.id] = get().renameDraftBySession[session.id] ?? session.title;
           return accumulator;
         }, {}),
+        notice: null,
         error: null
       });
 
@@ -213,139 +229,169 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!socket || socket.readyState === WebSocket.CLOSED) {
         connectSocket(baseUrl, token, set, get);
       }
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not refresh this phone's desktop state.");
     } finally {
       set({ refreshing: false });
     }
   },
   async selectSession(sessionId: string) {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const messages = await api.listMessages(token, baseUrl, sessionId);
-    set((state) => ({
-      selectedSessionId: sessionId,
-      messagesBySession: {
-        ...state.messagesBySession,
-        [sessionId]: messages
-      },
-      view: "chat",
-      error: null
-    }));
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const messages = await api.listMessages(token, baseUrl, sessionId);
+      set((state) => ({
+        selectedSessionId: sessionId,
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: messages
+        },
+        view: "chat",
+        notice: null,
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not open that chat.");
+    }
   },
   async createSession() {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const rootPath = get().newSessionRootPath || get().hostStatus?.host.approvedRoots[0];
-    const title = get().newSessionTitle.trim();
-    const session = await api.createSession(token, baseUrl, {
-      rootPath,
-      ...(title ? { title } : {})
-    });
-    set((state) => ({
-      sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
-      selectedSessionId: session.id,
-      newSessionTitle: "",
-      renameDraftBySession: {
-        ...state.renameDraftBySession,
-        [session.id]: session.title
-      },
-      view: "chat",
-      error: null
-    }));
-    await get().selectSession(session.id);
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const rootPath = get().newSessionRootPath || get().hostStatus?.host.approvedRoots[0];
+      const title = get().newSessionTitle.trim();
+      const session = await api.createSession(token, baseUrl, {
+        rootPath,
+        ...(title ? { title } : {})
+      });
+      set((state) => ({
+        sessions: sortSessionsForDisplay([session, ...state.sessions.filter((item) => item.id !== session.id)]),
+        selectedSessionId: session.id,
+        newSessionTitle: "",
+        renameDraftBySession: {
+          ...state.renameDraftBySession,
+          [session.id]: session.title
+        },
+        view: "chat",
+        notice: null,
+        error: null
+      }));
+      await get().selectSession(session.id);
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not start a new chat.");
+    }
   },
   async renameSession(sessionId: string) {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const title = (get().renameDraftBySession[sessionId] ?? "").trim();
-    if (!title) {
-      set({ error: "Chat names cannot be empty." });
-      return;
-    }
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const title = (get().renameDraftBySession[sessionId] ?? "").trim();
+      if (!title) {
+        set({ error: "Chat names cannot be empty." });
+        return;
+      }
 
-    const session = await api.updateSession(token, baseUrl, sessionId, { title });
-    set((state) => ({
-      sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)].sort((left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt)
-      ),
-      renameDraftBySession: {
-        ...state.renameDraftBySession,
-        [session.id]: session.title
-      },
-      error: null
-    }));
+      const session = await api.updateSession(token, baseUrl, sessionId, { title });
+      set((state) => ({
+        sessions: sortSessionsForDisplay([session, ...state.sessions.filter((item) => item.id !== session.id)]),
+        renameDraftBySession: {
+          ...state.renameDraftBySession,
+          [session.id]: session.title
+        },
+        notice: null,
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not rename that chat.");
+    }
   },
   async deleteSession(sessionId: string) {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    await api.deleteSession(token, baseUrl, sessionId);
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      await api.deleteSession(token, baseUrl, sessionId);
 
-    set((state) => {
-      const remainingSessions = state.sessions.filter((item) => item.id !== sessionId);
-      const nextSelectedSessionId =
-        state.selectedSessionId === sessionId
-          ? (remainingSessions[0]?.id ?? null)
-          : state.selectedSessionId;
+      set((state) => {
+        const remainingSessions = sortSessionsForDisplay(state.sessions.filter((item) => item.id !== sessionId));
+        const nextSelectedSessionId =
+          state.selectedSessionId === sessionId
+            ? pickPreferredSessionId(null, remainingSessions)
+            : state.selectedSessionId;
 
-      const nextMessagesBySession = { ...state.messagesBySession };
-      delete nextMessagesBySession[sessionId];
+        const nextMessagesBySession = { ...state.messagesBySession };
+        delete nextMessagesBySession[sessionId];
 
-      const nextRenameDrafts = { ...state.renameDraftBySession };
-      delete nextRenameDrafts[sessionId];
+        const nextRenameDrafts = { ...state.renameDraftBySession };
+        delete nextRenameDrafts[sessionId];
 
-      return {
-        sessions: remainingSessions,
-        selectedSessionId: nextSelectedSessionId,
-        messagesBySession: nextMessagesBySession,
-        renameDraftBySession: nextRenameDrafts,
-        view: nextSelectedSessionId ? state.view : "sessions",
-        error: null
-      };
-    });
+        return {
+          sessions: remainingSessions,
+          selectedSessionId: nextSelectedSessionId,
+          messagesBySession: nextMessagesBySession,
+          renameDraftBySession: nextRenameDrafts,
+          view: nextSelectedSessionId ? state.view : "sessions",
+          notice: null,
+          error: null
+        };
+      });
 
-    const nextSelectedSessionId = get().selectedSessionId;
-    if (nextSelectedSessionId) {
-      await get().selectSession(nextSelectedSessionId);
+      const nextSelectedSessionId = get().selectedSessionId;
+      if (nextSelectedSessionId) {
+        await get().selectSession(nextSelectedSessionId);
+      }
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not delete that chat.");
     }
   },
   async sendMessage() {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const text = get().composer.trim();
-    if (!text) {
-      return;
-    }
-
-    let sessionId = get().selectedSessionId;
-    if (!sessionId) {
-      const operatorSession = await ensureOperatorSession(get, set, {
-        token,
-        baseUrl,
-        hostStatus: get().hostStatus
-      });
-      sessionId = operatorSession?.id ?? pickPreferredSessionId(null, get().sessions);
-      if (sessionId) {
-        await get().selectSession(sessionId);
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const text = get().composer.trim();
+      if (!text) {
+        return;
       }
-    }
-    const resolvedSessionId = requireValue(sessionId, "Open or start a chat before sending a message.");
 
-    const message = await api.postMessage(token, baseUrl, resolvedSessionId, { text });
-    set((state) => ({
-      composer: "",
-      messagesBySession: {
-        ...state.messagesBySession,
-        [resolvedSessionId]: [...(state.messagesBySession[resolvedSessionId] ?? []), message]
-      },
-      error: null
-    }));
-    await get().refresh();
+      let sessionId = get().selectedSessionId;
+      if (!sessionId) {
+        const operatorSession = await ensureOperatorSession(get, set, {
+          token,
+          baseUrl,
+          hostStatus: get().hostStatus
+        });
+        sessionId = operatorSession?.id ?? pickPreferredSessionId(null, get().sessions);
+        if (sessionId) {
+          await get().selectSession(sessionId);
+        }
+      }
+      const resolvedSessionId = requireValue(sessionId, "Open or start a chat before sending a message.");
+
+      const message = await api.postMessage(token, baseUrl, resolvedSessionId, { text });
+      set((state) => ({
+        composer: "",
+        notice: null,
+        messagesBySession: {
+          ...state.messagesBySession,
+          [resolvedSessionId]: [...(state.messagesBySession[resolvedSessionId] ?? []), message]
+        },
+        error: null
+      }));
+      await get().refresh();
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not send that message.");
+    }
   },
   async stopSession() {
-    const token = requireValue(get().token, "Pair this phone with the desktop first.");
-    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const sessionId = requireValue(get().selectedSessionId, "Open a chat before stopping a run.");
-    await api.stopSession(token, baseUrl, sessionId);
-    await get().refresh();
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const sessionId = requireValue(get().selectedSessionId, "Open a chat before stopping a run.");
+      await api.stopSession(token, baseUrl, sessionId);
+      set({ notice: "Stop requested. Waiting for the desktop to halt the current run.", error: null });
+      await get().refresh();
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not stop the current run.");
+    }
   },
   async toggleAutoSpeak() {
     const next = !get().autoSpeak;
@@ -371,6 +417,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!get().voiceAvailable) {
       set({
         listening: false,
+        notice: null,
         error: "Voice input is not available on this phone yet. Install or enable the device speech recognition service and try again."
       });
       return;
@@ -378,25 +425,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (get().listening) {
       await voice.stopListening();
-      set({ listening: false, error: null });
+      set({ listening: false, notice: null, error: null });
       return;
     }
 
-    set({ error: null });
+    set({ notice: null, error: null });
     try {
       await voice.startListening(
         (text) => {
-          set({ composer: text, listening: false, error: null, view: "chat" });
+          if (get().autoSendVoice && requiresVoiceReview(text)) {
+            set({
+              composer: text,
+              listening: false,
+              notice: "Review the captured voice transcript before sending. Auto-send paused for this turn.",
+              error: null,
+              view: "chat"
+            });
+            return;
+          }
+
+          set({ composer: text, listening: false, notice: null, error: null, view: "chat" });
           void maybeAutoSendVoiceResult(get, set);
         },
         (message) => {
-          set({ listening: false, error: message });
+          set({ listening: false, notice: null, error: message });
         }
       );
-      set({ listening: true });
+      set({ listening: true, notice: get().autoSendVoice ? "Listening. Completed speech will send automatically unless review is required." : null });
     } catch (error) {
       set({
         listening: false,
+        notice: null,
         error: error instanceof Error ? error.message : "Voice recognition could not start."
       });
       throw error;
@@ -531,8 +590,7 @@ function applyStreamEvent(
 
   if (payload.type === "session_upsert") {
     set((state) => ({
-      sessions: [payload.session, ...state.sessions.filter((item) => item.id !== payload.session.id)]
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      sessions: sortSessionsForDisplay([payload.session, ...state.sessions.filter((item) => item.id !== payload.session.id)]),
       renameDraftBySession: {
         ...state.renameDraftBySession,
         [payload.session.id]: payload.session.title
@@ -580,21 +638,6 @@ function requireValue<T>(value: T | null | undefined, message: string): T {
   return value;
 }
 
-const OPERATOR_SESSION_TITLE = "Operator";
-
-function pickPreferredSessionId(currentSelected: string | null, sessions: ChatSession[]): string | null {
-  if (currentSelected && sessions.some((session) => session.id === currentSelected)) {
-    return currentSelected;
-  }
-
-  const operatorSession = findOperatorSession(sessions);
-  return operatorSession?.id ?? sessions[0]?.id ?? null;
-}
-
-function findOperatorSession(sessions: ChatSession[]): ChatSession | undefined {
-  return sessions.find((session) => session.title.trim().toLowerCase() === OPERATOR_SESSION_TITLE.toLowerCase());
-}
-
 async function ensureOperatorSession(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
@@ -624,21 +667,18 @@ async function ensureOperatorSession(
   });
 
   set((state) => ({
-    sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
+    sessions: sortSessionsForDisplay([session, ...state.sessions.filter((item) => item.id !== session.id)]),
     selectedSessionId: state.selectedSessionId ?? session.id,
     renameDraftBySession: {
       ...state.renameDraftBySession,
       [session.id]: session.title
     },
     view: "chat",
+    notice: "Operator chat is ready.",
     error: null
   }));
 
   return session;
-}
-
-function isSessionBusy(session: ChatSession | null | undefined): boolean {
-  return Boolean(session && (session.status === "queued" || session.status === "running" || session.status === "stopping"));
 }
 
 async function maybeAutoSendVoiceResult(
@@ -661,4 +701,48 @@ async function maybeAutoSendVoiceResult(
       error: error instanceof Error ? error.message : "Voice captured, but the desktop could not send the message yet."
     });
   }
+}
+
+async function handleStoreError(
+  error: unknown,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  get: () => AppState,
+  fallbackMessage: string
+): Promise<void> {
+  const message = error instanceof Error ? error.message : fallbackMessage;
+
+  if (isPairingRepairErrorMessage(message)) {
+    await enterRepairMode(set, get, pairingRepairMessage());
+    return;
+  }
+
+  set({ notice: null, error: message || fallbackMessage });
+}
+
+async function enterRepairMode(
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  get: () => AppState,
+  message: string
+): Promise<void> {
+  disconnectSocket();
+  tts.stop();
+  await clearDeviceToken();
+  set({
+    token: null,
+    hostStatus: null,
+    sessions: [],
+    selectedSessionId: null,
+    messagesBySession: {},
+    composer: "",
+    newSessionRootPath: "",
+    newSessionTitle: "",
+    renameDraftBySession: {},
+    refreshing: false,
+    realtimeConnected: false,
+    listening: false,
+    lastSpokenMessageId: null,
+    notice: "Saved desktop settings were kept so you can repair this link quickly.",
+    error: message,
+    view: "host"
+  });
 }

@@ -13,10 +13,13 @@ For the current checkpoint handoff, see [docs/STATUS.md](/home/adamgoodwin/code/
 - `npm run launch` starts the gateway plus desktop host and opens that GUI automatically
 - the dashboard includes pairing, Tailscale guidance, recent sessions, recent devices, QR onboarding, and Android APK download support
 - a Linux desktop launcher installer is available via `npm run app:desktop:install-launcher`
+- the phone now keeps a default `Operator` chat path for quick remote turns
+- pairing codes stay stable across normal desktop restarts and the phone can enter a repair flow if its saved token goes stale
 
 ### What Is Next
 
-- run another real-phone acceptance pass through the dashboard-based install and chat flow
+- run another real-phone acceptance pass through the dashboard-based operator loop
+- keep improving voice safety, readable chat output, and shared phone/desktop recovery messaging
 - decide whether the new Electron shell scaffold should be promoted to a supported path or stay internal until runtime issues are resolved
 - validate iOS and release packaging after the desktop dashboard flow is fully locked down
 
@@ -140,10 +143,12 @@ npm run build:android-release
 
 1. enter the desktop URL reachable from your phone
 2. enter the pairing code shown by the desktop host
-3. create a chat session from one of the approved roots
-4. send a text message or use push-to-talk
+3. let the phone restore the default `Operator` chat, or create a named chat session from one of the approved roots
+4. send a text message or use `Talk To Codex`
 5. watch the assistant response stream into the chat
 6. stop the run from the phone if needed
+
+If the phone says the desktop link needs repair, use the saved desktop URL and the stable pairing code instead of treating it like a full first-time setup.
 
 ## 7) Smoke Test
 

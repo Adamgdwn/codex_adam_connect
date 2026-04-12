@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- synced local `AGENTS.md` with the richer GitHub guidance so governance, product priorities, adjacency checks, and done standards match the current repo intent
+- reframed the near-term roadmap around the `Operator loop`: persistent pairing/recovery, default operator chat, reliable voice/TTS, and shared phone/desktop recovery behavior
+- split the mobile shell into smaller screen and component modules so new operator-loop fixes do not keep piling into one monolith
+- pinned the default `Operator` chat to the top of the phone UI and improved message readability with clearer roles, timestamps, and code-block rendering
+- added a pairing-repair path that keeps saved desktop settings when the phone token becomes stale, so reconnecting is faster than starting over
+- made voice auto-send safer by pausing for review on risky or long transcripts even when auto-send is enabled
+- cleaned up TTS output so spoken replies avoid raw markdown and fenced code formatting
 - fixed `npm run launch` so it loads `.env` before registering approved roots
 - added a release Android build path and made the dashboard prefer `app-release.apk` for phone installs
 - removed forced APK attachment headers so Android browsers can hand off to the installer more directly
@@ -26,6 +33,7 @@
 
 ### What Is Next
 
-- run another end-to-end real-phone validation pass
-- resolve the native-shell runtime path before promoting it to a supported command
-- validate iOS packaging and release-oriented distribution next
+- run another end-to-end real-phone validation pass focused on the operator loop
+- verify the new pairing-repair and voice-review paths on a real phone
+- keep tightening voice/send/reply behavior, chat readability, and shared recovery messaging
+- continue reducing the size and responsibility of the remaining mixed-purpose mobile state code

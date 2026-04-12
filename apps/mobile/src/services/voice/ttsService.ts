@@ -1,3 +1,5 @@
+import { sanitizeTextForSpeech } from "../../utils/operatorConsole";
+
 type TtsModule = {
   speak(text: string): void;
   stop(): void;
@@ -19,8 +21,12 @@ export class TtsService {
   }
 
   speak(text: string): void {
+    const spokenText = sanitizeTextForSpeech(text);
+    if (!spokenText) {
+      return;
+    }
     this.tts?.stop();
-    this.tts?.speak(text);
+    this.tts?.speak(spokenText);
   }
 
   stop(): void {

@@ -2,6 +2,8 @@
 
 Adam Connect lets your phone talk to the Codex CLI running on your desktop computer over Tailscale. The phone does not need an OpenAI API key. Your desktop stays the trusted bridge.
 
+The near-term product goal is simple: the phone should feel like a persistent remote operator console for Codex, not a thin terminal.
+
 ## Current Status
 
 ### Completed In This Checkpoint
@@ -12,7 +14,9 @@ Adam Connect lets your phone talk to the Codex CLI running on your desktop compu
 
 ### Next Up
 
-- run another full real-phone acceptance pass using the dashboard-first setup
+- run another full real-phone acceptance pass focused on the operator loop
+- tighten pairing recovery, voice send/reply behavior, and shared phone/desktop status messaging
+- improve chat readability and session management without losing the low-friction operator flow
 - validate iOS on a real build machine
 - decide whether to ship the native Electron shell scaffold or keep the browser dashboard as the long-term desktop surface
 
@@ -87,6 +91,8 @@ Notes:
 - After pairing, the phone stores a long-lived device token.
 - That means normal day-to-day use should not require repairing unless you reinstall the app, clear app storage, or move to a new phone.
 - The pairing code now stays stable across normal desktop restarts, so remote recovery is less fragile.
+- Reconnecting to an existing paired desktop should be treated as recovery, not as a full new setup flow.
+- If the saved phone token goes stale, Adam Connect keeps the saved desktop URL and device settings so repair is faster than a full new setup.
 
 The current desktop URL is usually shown near the top of the desktop dashboard and on the phone install page, for example:
 
@@ -101,12 +107,18 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
+For everyday use, prefer the default `Operator` chat unless you intentionally want a separate named project thread.
+The `Operator` chat is pinned to the top of the chat list so quick remote turns stay easy to find.
+
 ## What The Screens Mean
 
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
 - `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
 - `Chats`: create or reopen persistent chat sessions tied to approved desktop roots.
 - `Chat`: send messages, use voice transcription, watch streamed replies, and stop active runs.
+
+The phone and desktop should present the same broad picture of what is happening: online/offline state, run status, recent recovery needs, and whether Codex is ready.
+The phone chat view now also shows clearer message roles, timestamps, and code blocks so longer replies are easier to scan.
 
 ## Troubleshooting
 
@@ -117,6 +129,8 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 - If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
 - If push-to-talk says voice input is unavailable, confirm the phone has a speech recognition service enabled and set as the default Android voice service.
 - If a voice turn transcribes but does not send, check whether `Auto-send voice turns` is enabled on the `Host` screen.
+- If `Auto-send voice turns` is enabled but the app pauses instead of sending, Adam Connect likely decided the transcript was long or risky enough to require review first.
+- If the app says the desktop link needs repair, use the saved desktop URL and current pairing code instead of disconnecting and re-entering everything manually.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use
@@ -124,6 +138,7 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 1. Start `npm run launch` on the desktop.
 2. Open Adam Connect on the phone.
 3. Confirm the `Host` view shows `Codex ready`.
-4. Start or reopen a chat.
-5. Send text or voice-transcribed prompts.
-6. Stop runs from the phone when needed.
+4. Reconnect to your existing paired desktop if needed using the saved URL and stable pairing code.
+5. Use the default `Operator` chat for quick turns, or open a named project chat when you want a separate thread.
+6. Send text or voice-transcribed prompts.
+7. Stop runs from the phone when needed.
