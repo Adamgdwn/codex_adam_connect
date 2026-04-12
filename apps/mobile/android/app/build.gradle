@@ -54,13 +54,31 @@ react {
     /* Hermes Commands */
     //   The hermes compiler command to run. By default it is 'hermesc'
     // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    hermesCommand = file("${rootDir}/../../../node_modules/react-native/sdks/hermesc/${hermesBinaryRelativePath}").absolutePath
+    hermesCommand = file("${rootDir}/../../../node_modules/hermes-compiler/hermesc/${hermesBinaryRelativePath}").absolutePath
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]
 
     /* Autolinking */
     autolinkLibrariesWithApp()
+    entryFile = file(
+        [
+            "node",
+            "-e",
+            "require('expo/scripts/resolveAppEntry')",
+            rootDir.getAbsoluteFile().getParentFile().getAbsolutePath(),
+            "android",
+            "absolute"
+        ].execute(null, rootDir).text.trim()
+    )
+    cliFile = new File(
+        [
+            "node",
+            "--print",
+            "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"
+        ].execute(null, rootDir).text.trim()
+    )
+    bundleCommand = "export:embed"
 }
 
 /**
@@ -93,6 +111,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [usesCleartextTraffic: "true"]
     }
     signingConfigs {
         debug {

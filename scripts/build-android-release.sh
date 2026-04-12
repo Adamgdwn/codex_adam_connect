@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 android_dir="$repo_root/apps/mobile/android"
-hermesc_linux="$repo_root/node_modules/react-native/sdks/hermesc/linux64-bin/hermesc"
+hermesc_linux="$repo_root/node_modules/hermes-compiler/hermesc/linux64-bin/hermesc"
 
 default_java_home="${HOME}/.local/jdks/temurin-17"
 default_sdk_root="${HOME}/Android/Sdk"

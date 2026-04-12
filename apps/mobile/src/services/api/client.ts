@@ -4,7 +4,8 @@ import type {
   CreateSessionRequest,
   HostStatus,
   PairingCompleteResponse,
-  PostMessageRequest
+  PostMessageRequest,
+  UpdateSessionRequest
 } from "@adam-connect/shared";
 
 export class ApiClient {
@@ -27,6 +28,14 @@ export class ApiClient {
     return this.request("POST", `${baseUrl}/sessions`, token, input);
   }
 
+  updateSession(token: string, baseUrl: string, sessionId: string, input: UpdateSessionRequest): Promise<ChatSession> {
+    return this.request("PATCH", `${baseUrl}/sessions/${encodeURIComponent(sessionId)}`, token, input);
+  }
+
+  deleteSession(token: string, baseUrl: string, sessionId: string): Promise<{ ok: true; deletedSessionId: string }> {
+    return this.request("DELETE", `${baseUrl}/sessions/${encodeURIComponent(sessionId)}`, token);
+  }
+
   listMessages(token: string, baseUrl: string, sessionId: string): Promise<ChatMessage[]> {
     return this.request("GET", `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/messages`, token);
   }
@@ -40,14 +49,20 @@ export class ApiClient {
   }
 
   private async request<T>(method: string, url: string, token?: string, body?: unknown): Promise<T> {
-    const response = await fetch(url, {
-      method,
-      headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        ...(body ? { "content-type": "application/json" } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          ...(body ? { "content-type": "application/json" } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? error.message : "network request failed";
+      throw new Error(`Could not reach the desktop host at ${url}. ${detail}`);
+    }
 
     const text = await response.text();
     const parsed = text ? (JSON.parse(text) as unknown) : null;

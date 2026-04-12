@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
-import type { ChatSession, DesktopOverviewResponse, GatewayOverview } from "@adam-connect/shared";
+import type { ChatMessage, ChatSession, DesktopOverviewResponse, GatewayOverview, RecentSessionActivity } from "@adam-connect/shared";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -95,7 +95,7 @@ export function renderDesktopPage(model: InstallPageModel): string {
   const tailscaleState = hostStatus?.tailscale.connected ? "Tailscale ready" : "Tailscale needs attention";
   const tailscaleDetail = hostStatus?.tailscale.detail ?? "Waiting for Tailscale status.";
   const roots = hostStatus?.host.approvedRoots ?? [];
-  const recentSessions = overview.recentSessions;
+  const recentSessionActivity = overview.recentSessionActivity;
   const recentDevices = overview.recentDevices;
 
   return renderPage({
@@ -174,124 +174,166 @@ export function renderDesktopPage(model: InstallPageModel): string {
           </article>
         </section>
 
-        <section class="content-grid">
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Phone onboarding</span>
-                <h2>Install and pair in one place</h2>
-              </div>
-              <a class="text-link" href="${escapeHtml(installUrl)}">Open phone page</a>
-            </div>
-            <div class="qr-box">${qrSvg}</div>
-            <p class="muted">
-              Scan this from your phone to open the install page directly. That page includes the APK download, desktop
-              URL, and pairing flow.
-            </p>
-            <code>${escapeHtml(installUrl)}</code>
-          </article>
+        <section class="tab-shell">
+          <nav class="tab-bar panel" aria-label="Desktop functions" role="tablist">
+            ${renderDesktopTabButton("overview", "Overview", true)}
+            ${renderDesktopTabButton("pairing", "Pairing")}
+            ${renderDesktopTabButton("chats", "Chats")}
+            ${renderDesktopTabButton("workspaces", "Workspaces")}
+            ${renderDesktopTabButton("devices", "Devices")}
+          </nav>
 
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Desktop status</span>
-                <h2>Health and readiness</h2>
-              </div>
-            </div>
-            <div class="stack gap-md">
-              <div class="status-card">
-                <strong>${escapeHtml(codexState)}</strong>
-                <p>${escapeHtml(codexDetail)}</p>
-              </div>
-              <div class="status-card">
-                <strong>${escapeHtml(tailscaleState)}</strong>
-                <p>${escapeHtml(tailscaleDetail)}</p>
-              </div>
-              <div class="status-card">
-                <strong>Local dashboard</strong>
-                <p>Open <code>${escapeHtml(dashboardUrl)}</code> on this desktop any time to get back here.</p>
-              </div>
-            </div>
-          </article>
-        </section>
+          <div class="tab-panel active" data-tab-panel="overview" role="tabpanel" aria-labelledby="tab-overview">
+            <section class="content-grid wide">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Desktop status</span>
+                    <h2>Health and readiness</h2>
+                  </div>
+                </div>
+                <div class="stack gap-md">
+                  <div class="status-card">
+                    <strong>${escapeHtml(codexState)}</strong>
+                    <p>${escapeHtml(codexDetail)}</p>
+                  </div>
+                  <div class="status-card">
+                    <strong>${escapeHtml(tailscaleState)}</strong>
+                    <p>${escapeHtml(tailscaleDetail)}</p>
+                  </div>
+                  <div class="status-card">
+                    <strong>Local dashboard</strong>
+                    <p>Open <code>${escapeHtml(dashboardUrl)}</code> on this desktop any time to get back here.</p>
+                  </div>
+                </div>
+              </article>
 
-        <section class="content-grid wide">
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Recent chats</span>
-                <h2>See what the phone has been working on</h2>
-              </div>
-            </div>
-            ${
-              recentSessions.length
-                ? `<div class="list-grid">${recentSessions.map(renderSessionCard).join("")}</div>`
-                : `<div class="empty-state">No chat sessions yet. Pair the phone, start a chat, and it will show up here.</div>`
-            }
-          </article>
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Quick start</span>
+                    <h2>Use it like an app</h2>
+                  </div>
+                </div>
+                <ol class="steps">
+                  <li>Run <code>npm run launch</code> from this repo.</li>
+                  <li>Keep this page open while the desktop host runs.</li>
+                  <li>Scan the QR code or open the phone install page over Tailscale.</li>
+                  <li>Install the Android APK, pair with the code, then chat.</li>
+                </ol>
+                <p class="muted">
+                  This dashboard refreshes automatically every 10 seconds so the pairing code, health, and chat activity stay current.
+                </p>
+              </article>
+            </section>
+          </div>
 
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Approved roots</span>
-                <h2>Desktop workspaces exposed to the phone</h2>
-              </div>
-            </div>
-            ${
-              roots.length
-                ? `<div class="stack gap-sm">${roots
-                    .map(
-                      (root) =>
-                        `<div class="token-row"><code>${escapeHtml(root)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(root)}">Copy</button></div>`
-                    )
-                    .join("")}</div>`
-                : `<div class="empty-state">No approved roots have been registered yet.</div>`
-            }
-          </article>
-        </section>
+          <div class="tab-panel" data-tab-panel="pairing" role="tabpanel" aria-labelledby="tab-pairing" hidden>
+            <section class="content-grid">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Phone onboarding</span>
+                    <h2>Install and pair in one place</h2>
+                  </div>
+                  <a class="text-link" href="${escapeHtml(installUrl)}">Open phone page</a>
+                </div>
+                <div class="qr-box">${qrSvg}</div>
+                <p class="muted">
+                  Scan this from your phone to open the install page directly. That page includes the APK download, desktop
+                  URL, and pairing flow.
+                </p>
+                <code>${escapeHtml(installUrl)}</code>
+              </article>
 
-        <section class="content-grid wide">
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Trusted phones</span>
-                <h2>Recent paired devices</h2>
-              </div>
-            </div>
-            ${
-              recentDevices.length
-                ? `<div class="list-grid compact">${recentDevices
-                    .map(
-                      (device) => `
-                        <div class="list-card">
-                          <strong>${escapeHtml(device.deviceName)}</strong>
-                          <p>Last seen ${escapeHtml(timeAgo(device.lastSeenAt))}</p>
-                          <span class="micro">${escapeHtml(device.id)}</span>
-                        </div>
-                      `
-                    )
-                    .join("")}</div>`
-                : `<div class="empty-state">No phone has paired yet.</div>`
-            }
-          </article>
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Direct links</span>
+                    <h2>Phone-safe launch points</h2>
+                  </div>
+                </div>
+                <div class="stack gap-sm">
+                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy URL</button></div>
+                  <div class="token-row"><code>${escapeHtml(installUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(installUrl)}">Copy Install Page</button></div>
+                  ${
+                    apkDownloadUrl
+                      ? `<div class="token-row"><code>${escapeHtml(apkDownloadUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(apkDownloadUrl)}">Copy APK</button></div>`
+                      : `<div class="empty-state">Android APK not built yet.</div>`
+                  }
+                </div>
+              </article>
+            </section>
+          </div>
 
-          <article class="panel section">
-            <div class="section-head">
-              <div>
-                <span class="label">Quick start</span>
-                <h2>Use it like an app</h2>
-              </div>
-            </div>
-            <ol class="steps">
-              <li>Run <code>npm run launch</code> from this repo.</li>
-              <li>Keep this page open while the desktop host runs.</li>
-              <li>Scan the QR code or open the phone install page over Tailscale.</li>
-              <li>Install the Android APK, pair with the code, then chat.</li>
-            </ol>
-            <p class="muted">
-              This dashboard refreshes automatically every 10 seconds so the pairing code, health, and chat activity stay current.
-            </p>
-          </article>
+          <div class="tab-panel" data-tab-panel="chats" role="tabpanel" aria-labelledby="tab-chats" hidden>
+            <section class="content-grid single">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Recent chats</span>
+                    <h2>See what the phone has been working on</h2>
+                  </div>
+                </div>
+                ${
+                  recentSessionActivity.length
+                    ? `<div class="list-grid">${recentSessionActivity.map(renderSessionCard).join("")}</div>`
+                    : `<div class="empty-state">No chat sessions yet. Pair the phone, start a chat, and it will show up here.</div>`
+                }
+              </article>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="workspaces" role="tabpanel" aria-labelledby="tab-workspaces" hidden>
+            <section class="content-grid single">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Approved roots</span>
+                    <h2>Desktop workspaces exposed to the phone</h2>
+                  </div>
+                </div>
+                ${
+                  roots.length
+                    ? `<div class="stack gap-sm">${roots
+                        .map(
+                          (root) =>
+                            `<div class="token-row"><code>${escapeHtml(root)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(root)}">Copy</button></div>`
+                        )
+                        .join("")}</div>`
+                    : `<div class="empty-state">No approved roots have been registered yet.</div>`
+                }
+              </article>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
+            <section class="content-grid single">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Trusted phones</span>
+                    <h2>Recent paired devices</h2>
+                  </div>
+                </div>
+                ${
+                  recentDevices.length
+                    ? `<div class="list-grid compact">${recentDevices
+                        .map(
+                          (device) => `
+                            <div class="list-card">
+                              <strong>${escapeHtml(device.deviceName)}</strong>
+                              <p>Last seen ${escapeHtml(timeAgo(device.lastSeenAt))}</p>
+                              <span class="micro">${escapeHtml(device.id)}</span>
+                            </div>
+                          `
+                        )
+                        .join("")}</div>`
+                    : `<div class="empty-state">No phone has paired yet.</div>`
+                }
+              </article>
+            </section>
+          </div>
         </section>
       </main>
     `
@@ -348,7 +390,7 @@ export function renderInstallPage(model: InstallPageModel): string {
               <strong class="pair-code">${escapeHtml(pairingCode)}</strong>
               <button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy</button>
             </div>
-            <p class="muted">The phone stores its own long-lived device token after pairing succeeds.</p>
+            <p class="muted">The phone stores its own long-lived device token after pairing succeeds, and this code stays stable across normal desktop restarts.</p>
           </article>
 
           <article class="panel section">
@@ -371,11 +413,11 @@ export function renderInstallPage(model: InstallPageModel): string {
             <h2>Start chatting</h2>
             <ol class="steps">
               <li>Open the Adam Connect app on Android.</li>
-              <li>Enter the desktop URL and pairing code from this page.</li>
+              <li>Enter the desktop URL and pairing code from this page. The QR code is optional convenience only.</li>
               <li>Create a chat from one of the approved workspace roots.</li>
               <li>Send a text prompt or use push-to-talk.</li>
             </ol>
-            <p class="muted">This page refreshes automatically, so if the pairing code rotates you will see the new one here.</p>
+            <p class="muted">Keep this URL handy for remote recovery. You only need the code again if you set up a new phone or reinstall the app.</p>
           </article>
 
           <article class="panel section">
@@ -720,6 +762,7 @@ function renderPage(input: { title: string; description: string; body: string })
         gap: 18px;
         margin-top: 18px;
         flex-wrap: wrap;
+        align-items: stretch;
       }
 
       .content-grid.single > * {
@@ -738,8 +781,48 @@ function renderPage(input: { title: string; description: string; body: string })
         flex: 1 1 360px;
       }
 
+      .tab-shell {
+        margin-top: 18px;
+      }
+
+      .tab-bar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 12px;
+      }
+
+      .tab-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 999px;
+        min-height: 44px;
+        padding: 0 16px;
+        background: rgba(17, 36, 62, 0.08);
+        color: var(--navy-800);
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      .tab-button.active {
+        color: #fff;
+        background: linear-gradient(135deg, var(--navy-950), var(--navy-800));
+      }
+
+      .tab-panel {
+        margin-top: 18px;
+        min-height: clamp(320px, 44vh, 720px);
+      }
+
+      .tab-panel[hidden] {
+        display: none;
+      }
+
       .section {
         padding: 22px;
+        height: 100%;
       }
 
       .section-head {
@@ -785,9 +868,62 @@ function renderPage(input: { title: string; description: string; body: string })
         padding: 16px 18px;
       }
 
+      .list-card.chat-activity {
+        padding: 18px;
+      }
+
       .list-card strong {
         display: block;
         font-size: 1.05rem;
+      }
+
+      .message-stack {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .message-preview {
+        padding: 12px 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.78);
+      }
+
+      .message-preview.user {
+        background: rgba(229, 238, 249, 0.68);
+      }
+
+      .message-preview.assistant {
+        background: rgba(216, 251, 243, 0.52);
+      }
+
+      .preview-label {
+        display: inline-block;
+        color: var(--navy-800);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .preview-text {
+        margin: 8px 0 0;
+        color: var(--text);
+        line-height: 1.55;
+      }
+
+      .preview-text.empty {
+        color: var(--muted);
+      }
+
+      .error-note {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(217, 107, 28, 0.12);
+        color: var(--orange);
+        font-weight: 700;
       }
 
       .micro {
@@ -872,6 +1008,15 @@ function renderPage(input: { title: string; description: string; body: string })
           flex-direction: column;
         }
 
+        .tab-bar {
+          flex-direction: column;
+        }
+
+        .tab-button {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
         .pair-code {
           letter-spacing: 0.12em;
         }
@@ -884,6 +1029,9 @@ function renderPage(input: { title: string; description: string; body: string })
     <script>
       const toast = document.getElementById("toast");
       let toastTimer;
+      const tabs = Array.from(document.querySelectorAll("[data-tab-target]"));
+      const panels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+      const storageKey = "adam-connect-desktop-tab";
       const showToast = (message) => {
         if (!toast) return;
         toast.textContent = message;
@@ -891,6 +1039,39 @@ function renderPage(input: { title: string; description: string; body: string })
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => toast.classList.remove("visible"), 1800);
       };
+      const activateTab = (tabId) => {
+        const targetId = tabs.some((button) => button.getAttribute("data-tab-target") === tabId)
+          ? tabId
+          : tabs[0]?.getAttribute("data-tab-target");
+        if (!targetId) return;
+        tabs.forEach((button) => {
+          const active = button.getAttribute("data-tab-target") === targetId;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-selected", active ? "true" : "false");
+          button.setAttribute("tabindex", active ? "0" : "-1");
+        });
+        panels.forEach((panel) => {
+          const active = panel.getAttribute("data-tab-panel") === targetId;
+          panel.classList.toggle("active", active);
+          panel.toggleAttribute("hidden", !active);
+        });
+        try {
+          localStorage.setItem(storageKey, targetId);
+        } catch {}
+      };
+      tabs.forEach((button) => {
+        button.addEventListener("click", () => activateTab(button.getAttribute("data-tab-target")));
+      });
+      const initialTab =
+        window.location.hash.replace(/^#/, "") ||
+        (() => {
+          try {
+            return localStorage.getItem(storageKey) || "overview";
+          } catch {
+            return "overview";
+          }
+        })();
+      activateTab(initialTab);
       document.querySelectorAll("[data-copy]").forEach((button) => {
         button.addEventListener("click", async () => {
           const value = button.getAttribute("data-copy") || "";
@@ -908,17 +1089,76 @@ function renderPage(input: { title: string; description: string; body: string })
 </html>`;
 }
 
-function renderSessionCard(session: ChatSession): string {
+function renderDesktopTabButton(id: string, label: string, active = false): string {
   return `
-    <div class="list-card">
+    <button
+      class="tab-button ${active ? "active" : ""}"
+      id="tab-${escapeAttribute(id)}"
+      type="button"
+      role="tab"
+      aria-selected="${active ? "true" : "false"}"
+      tabindex="${active ? "0" : "-1"}"
+      data-tab-target="${escapeAttribute(id)}"
+    >
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function renderSessionCard(activity: RecentSessionActivity): string {
+  const { session, latestUserMessage, latestAssistantMessage, lastMessageAt } = activity;
+  const assistantPreview = session.lastError
+    ? `Latest run stopped with an error: ${session.lastError}`
+    : latestAssistantMessage?.content?.trim()
+      ? latestAssistantMessage.content
+      : session.status === "running" || session.status === "queued"
+        ? "Codex is working on the latest turn."
+        : "No assistant reply has landed yet.";
+  return `
+    <div class="list-card chat-activity">
       <div class="status-line">
-        <strong>${escapeHtml(session.title)}</strong>
+        <div>
+          <strong>${escapeHtml(session.title)}</strong>
+          <span class="micro">${escapeHtml(session.rootPath)}</span>
+        </div>
         <span class="pill ${sessionPillClass(session.status)}">${escapeHtml(humanizeSessionStatus(session.status))}</span>
       </div>
-      <p>${escapeHtml(session.rootPath)}</p>
-      <span class="micro">Updated ${escapeHtml(timeAgo(session.updatedAt))}</span>
+      <div class="message-stack">
+        ${renderMessagePreview("Phone asked", latestUserMessage, "No user prompt has been captured yet.", "user")}
+        ${renderMessagePreview("Codex replied", assistantPreview, "No assistant reply has landed yet.", "assistant")}
+      </div>
+      ${
+        session.lastError
+          ? `<div class="error-note">${escapeHtml(session.lastError)}</div>`
+          : ""
+      }
+      <span class="micro">Updated ${escapeHtml(timeAgo(lastMessageAt ?? session.updatedAt))}</span>
     </div>
   `;
+}
+
+function renderMessagePreview(
+  label: string,
+  message: ChatMessage | string | null,
+  emptyState: string,
+  variant: "user" | "assistant"
+): string {
+  const content = typeof message === "string" ? message : message?.content ?? "";
+  const value = content.trim() ? truncatePreview(content.trim()) : emptyState;
+  const emptyClass = content.trim() ? "" : " empty";
+  return `
+    <div class="message-preview ${variant}">
+      <span class="preview-label">${escapeHtml(label)}</span>
+      <p class="preview-text${emptyClass}">${escapeHtml(value)}</p>
+    </div>
+  `;
+}
+
+function truncatePreview(value: string, maxLength = 220): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 function resolvePublicBaseUrl(req: IncomingMessage, overview: GatewayOverview): string {

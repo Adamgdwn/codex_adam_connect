@@ -1,9 +1,10 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  FlatList,
+  Keyboard,
   Linking,
+  Platform,
   Pressable,
-  SafeAreaView,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -11,12 +12,20 @@ import {
   TextInput,
   View
 } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppStore } from "../store/appStore";
 
 export function AppShell(): React.JSX.Element {
   const store = useAppStore();
   const bootstrap = useAppStore((state) => state.bootstrap);
   const setField = useAppStore((state) => state.setField);
+  const setView = useAppStore((state) => state.setView);
+  const selectSession = useAppStore((state) => state.selectSession);
+  const renameSession = useAppStore((state) => state.renameSession);
+  const deleteSession = useAppStore((state) => state.deleteSession);
+  const setRenameDraft = useAppStore((state) => state.setRenameDraft);
+  const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   useEffect(() => {
     bootstrap().catch((error) => {
@@ -25,9 +34,35 @@ export function AppShell(): React.JSX.Element {
     });
   }, [bootstrap, setField]);
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(Math.max(0, event.endCoordinates.height - insets.bottom));
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [insets.bottom]);
+
+  const selectedMessageCount = store.selectedSessionId ? (store.messagesBySession[store.selectedSessionId]?.length ?? 0) : 0;
+
+  useEffect(() => {
+    if (!store.token || !store.selectedSessionId || selectedMessageCount > 0) {
+      return;
+    }
+
+    selectSession(store.selectedSessionId).catch((error) => console.warn(error));
+  }, [selectSession, selectedMessageCount, store.selectedSessionId, store.token]);
+
   if (store.booting) {
     return (
-      <SafeAreaView style={styles.root}>
+      <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
         <View style={styles.heroCard}>
           <Text style={styles.eyebrow}>Adam Connect v1</Text>
           <Text style={styles.heroTitle}>Desktop-grade Codex, now one scan from your phone.</Text>
@@ -39,8 +74,12 @@ export function AppShell(): React.JSX.Element {
 
   if (!store.token) {
     return (
-      <SafeAreaView style={styles.root}>
-        <ScrollView contentContainerStyle={styles.content}>
+      <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + keyboardHeight + 12 }]}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
           <View style={styles.heroCard}>
             <Text style={styles.eyebrow}>Pair Over Tailscale</Text>
             <Text style={styles.heroTitle}>Adam Connect</Text>
@@ -53,6 +92,7 @@ export function AppShell(): React.JSX.Element {
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Connect</Text>
             <LabeledInput label="Desktop URL" value={store.baseUrl} onChange={(value) => store.setField("baseUrl", value)} />
+            {store.baseUrl ? <Text style={styles.supportingText}>Desktop URL is pre-filled for this host.</Text> : null}
             <LabeledInput
               label="Device Name"
               value={store.deviceName}
@@ -111,11 +151,36 @@ export function AppShell(): React.JSX.Element {
   }
 
   const selectedSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? null;
-  const messages = selectedSession ? store.messagesBySession[selectedSession.id] ?? [] : [];
+  const hasSelectedSession = Boolean(store.selectedSessionId);
+  const hasFallbackSession = store.sessions.length > 0;
+  const canCreateFromApprovedRoot = Boolean(store.newSessionRootPath || store.hostStatus?.host.approvedRoots[0]);
+  const canSend = Boolean((hasSelectedSession || hasFallbackSession || canCreateFromApprovedRoot) && store.composer.trim().length > 0);
+  const messages = store.selectedSessionId ? store.messagesBySession[store.selectedSessionId] ?? [] : [];
   const busy = selectedSession ? selectedSession.status === "queued" || selectedSession.status === "running" : false;
+  const keyboardInset = store.view === "sessions" || store.view === "chat" ? keyboardHeight : 0;
+  const screenBottomPadding = Math.max(insets.bottom, 16) + keyboardInset + 12;
+  const composerBottomPadding = Math.max(insets.bottom, 12);
+  const handleRefresh = () => {
+    store.refresh().catch((error) => console.warn(error));
+  };
+
+  const handleNavPress = (view: "host" | "sessions" | "chat") => {
+    if (view !== "chat") {
+      setView(view);
+      return;
+    }
+
+    const targetSessionId = store.selectedSessionId ?? store.sessions[0]?.id;
+    if (targetSessionId) {
+      selectSession(targetSessionId).catch((error) => console.warn(error));
+      return;
+    }
+
+    setView("chat");
+  };
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>Private Operator Link</Text>
@@ -142,13 +207,14 @@ export function AppShell(): React.JSX.Element {
             label={humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")}
             tone={store.hostStatus?.auth.status === "logged_in" ? "teal" : "orange"}
           />
+          <StatusChip label={store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"} tone={store.realtimeConnected ? "teal" : "orange"} />
         </View>
         <View style={styles.nav}>
           {(["host", "sessions", "chat"] as const).map((view) => (
             <Pressable
               key={view}
               style={[styles.navButton, store.view === view ? styles.navButtonActive : null]}
-              onPress={() => store.setView(view)}
+              onPress={() => handleNavPress(view)}
             >
               <Text style={[styles.navLabel, store.view === view ? styles.navLabelActive : null]}>
                 {labelForView(view)}
@@ -159,7 +225,12 @@ export function AppShell(): React.JSX.Element {
       </View>
 
       {store.view === "host" && (
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
+          refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={handleRefresh} tintColor="#0f766e" />}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Host Status</Text>
             <View style={styles.statusRow}>
@@ -235,13 +306,20 @@ export function AppShell(): React.JSX.Element {
                 }}
               />
             </View>
+            <View style={styles.rowBetween}>
+              <Text style={styles.metric}>Auto-send voice turns</Text>
+              <Switch
+                value={store.autoSendVoice}
+                onValueChange={() => {
+                  store.toggleAutoSendVoice().catch((error) => console.warn(error));
+                }}
+              />
+            </View>
           </View>
 
           <Pressable
             style={styles.secondaryButton}
-            onPress={() => {
-              store.refresh().catch((error) => console.warn(error));
-            }}
+            onPress={handleRefresh}
           >
             <Text style={styles.secondaryLabel}>Refresh Host</Text>
           </Pressable>
@@ -249,10 +327,23 @@ export function AppShell(): React.JSX.Element {
       )}
 
       {store.view === "sessions" && (
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.screenContent}
+          contentContainerStyle={[styles.content, { paddingBottom: screenBottomPadding }]}
+          refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={handleRefresh} tintColor="#0f766e" />}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>New Chat</Text>
             <Text style={styles.supportingText}>Pick one approved workspace and start a persistent Codex thread.</Text>
+            <Text style={styles.supportingText}>Adam Connect also keeps a default `Operator` chat ready for quick voice turns.</Text>
+            <LabeledInput
+              label="Chat Name"
+              value={store.newSessionTitle}
+              onChange={(value) => store.setField("newSessionTitle", value)}
+              autoCapitalize="sentences"
+            />
             <LabeledInput
               label="Workspace Root"
               value={store.newSessionRootPath}
@@ -268,79 +359,132 @@ export function AppShell(): React.JSX.Element {
             </Pressable>
           </View>
 
-          <FlatList
-            data={store.sessions}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <Pressable
-                style={[styles.card, styles.sessionCard]}
-                onPress={() => {
-                  store.selectSession(item.id).catch((error) => console.warn(error));
-                }}
-              >
+          {store.sessions.length ? (
+            store.sessions.map((item) => (
+              <View key={item.id} style={[styles.card, styles.sessionCard]}>
                 <Text style={styles.sectionTitle}>{item.title}</Text>
-                <Text style={styles.metric}>{item.rootPath}</Text>
+                <Text style={styles.rootPath}>{item.rootPath}</Text>
                 <Text style={styles.metric}>
-                  {item.status}
+                  Status: {item.status}
                   {item.lastError ? ` | ${item.lastError}` : ""}
                 </Text>
-              </Pressable>
-            )}
-            ListEmptyComponent={<Text style={styles.metric}>No chats yet. Start one from an approved root.</Text>}
-          />
-        </View>
+                <LabeledInput
+                  label="Rename Chat"
+                  value={store.renameDraftBySession[item.id] ?? item.title}
+                  onChange={(value) => setRenameDraft(item.id, value)}
+                  autoCapitalize="sentences"
+                />
+                <View style={[styles.actions, styles.chatActions]}>
+                  <Pressable
+                    style={[styles.secondaryButton, styles.chatActionButton]}
+                    onPress={() => {
+                      renameSession(item.id).catch((error) => console.warn(error));
+                    }}
+                  >
+                    <Text style={styles.secondaryLabel}>Rename</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.primaryButton, styles.chatActionButton]}
+                    onPress={() => {
+                      selectSession(item.id).catch((error) => console.warn(error));
+                    }}
+                  >
+                    <Text style={styles.primaryLabel}>Open Chat</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.secondaryButton, styles.chatActionButton, styles.dangerButton]}
+                    onPress={() => {
+                      deleteSession(item.id).catch((error) => console.warn(error));
+                    }}
+                  >
+                    <Text style={[styles.secondaryLabel, styles.dangerButtonLabel]}>Delete Chat</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.metric}>No chats yet. Start one from an approved root.</Text>
+          )}
+        </ScrollView>
       )}
 
       {store.view === "chat" && (
-        <View style={styles.content}>
-          <View style={styles.card}>
+        <ScrollView
+          style={styles.screenContent}
+          contentContainerStyle={[
+            styles.chatScrollContent,
+            {
+              paddingBottom: composerBottomPadding + keyboardInset + 20
+            }
+          ]}
+          refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={handleRefresh} tintColor="#0f766e" />}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={[styles.card, styles.chatSummaryCard]}>
             <Text style={styles.sectionTitle}>{selectedSession?.title ?? "No chat selected"}</Text>
-            <Text style={styles.metric}>{selectedSession?.rootPath ?? "Choose a session from Chats."}</Text>
+            <Text style={styles.metric} numberOfLines={2}>
+              {selectedSession?.rootPath ??
+                (hasFallbackSession
+                  ? "Send will resume your latest chat if you do not manually pick one first."
+                  : canCreateFromApprovedRoot
+                    ? "Send will start your first chat automatically using the default approved root."
+                    : "Choose or start a chat from the Chats tab first.")}
+            </Text>
             <View style={styles.statusRow}>
               <StatusChip
                 label={selectedSession ? `Status: ${selectedSession.status}` : "Waiting for a chat"}
                 tone={selectedSession?.status === "error" ? "orange" : "teal"}
               />
             </View>
+            {!hasSelectedSession && hasFallbackSession ? (
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={() => {
+                  store.selectSession(store.sessions[0].id).catch((error) => console.warn(error));
+                }}
+              >
+                <Text style={styles.secondaryLabel}>Resume Latest Chat</Text>
+              </Pressable>
+            ) : null}
           </View>
 
-          <FlatList
-            data={messages}
-            keyExtractor={(item) => item.id}
-            style={styles.messages}
-            contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <View style={[styles.messageBubble, item.role === "user" ? styles.userBubble : styles.assistantBubble]}>
-                <Text style={styles.messageRole}>{item.role}</Text>
-                <Text style={styles.messageText}>{item.content || item.errorMessage || "..."}</Text>
-                <Text style={styles.messageMeta}>{item.status}</Text>
-              </View>
+          <View style={styles.messages}>
+            {messages.length > 0 ? (
+              messages.map((item) => (
+                <View key={item.id} style={[styles.messageBubble, item.role === "user" ? styles.userBubble : styles.assistantBubble]}>
+                  <Text style={styles.messageRole}>{item.role}</Text>
+                  <Text style={styles.messageText}>{item.content || item.errorMessage || "..."}</Text>
+                  <Text style={styles.messageMeta}>{item.status}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.metric}>Open a chat to see message history.</Text>
             )}
-            ListEmptyComponent={<Text style={styles.metric}>Open a chat to see message history.</Text>}
-          />
+          </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, styles.chatComposerCard]}>
             <TextInput
               value={store.composer}
               onChangeText={(value) => store.setField("composer", value)}
               placeholder="Ask Codex something about this repo..."
               placeholderTextColor="#64748b"
               multiline
-              style={styles.composer}
+              style={[styles.composer, Platform.OS === "android" ? styles.composerCompact : null]}
             />
-            <View style={styles.actions}>
+            <View style={[styles.actions, styles.chatActions]}>
               <Pressable
-                style={[styles.secondaryButton, !store.voiceAvailable ? styles.disabledButton : null]}
+                style={[styles.secondaryButton, styles.chatActionButton, !store.voiceAvailable ? styles.warningButton : null]}
                 onPress={() => {
                   store.toggleListening().catch((error) => console.warn(error));
                 }}
-                disabled={!store.voiceAvailable}
               >
-                <Text style={styles.secondaryLabel}>{store.listening ? "Stop Mic" : "Push To Talk"}</Text>
+                <Text style={[styles.secondaryLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>
+                  {store.listening ? "Stop Mic" : store.autoSendVoice ? "Talk To Codex" : "Push To Talk"}
+                </Text>
               </Pressable>
               <Pressable
-                style={[styles.secondaryButton, !busy ? styles.disabledButton : null]}
+                style={[styles.secondaryButton, styles.chatActionButton, !busy ? styles.disabledButton : null]}
                 onPress={() => {
                   store.stopSession().catch((error) => console.warn(error));
                 }}
@@ -349,17 +493,29 @@ export function AppShell(): React.JSX.Element {
                 <Text style={styles.secondaryLabel}>Stop</Text>
               </Pressable>
               <Pressable
-                style={[styles.primaryButton, !selectedSession ? styles.disabledButton : null]}
+                style={[styles.primaryButton, styles.chatActionButton, !canSend ? styles.disabledButton : null]}
                 onPress={() => {
                   store.sendMessage().catch((error) => console.warn(error));
                 }}
-                disabled={!selectedSession}
+                disabled={!canSend}
               >
                 <Text style={styles.primaryLabel}>Send</Text>
               </Pressable>
             </View>
+            {!hasFallbackSession ? <Text style={styles.supportingText}>Start a chat in `Chats` before sending your first prompt.</Text> : null}
+            {!hasFallbackSession && canCreateFromApprovedRoot ? (
+              <Text style={styles.supportingText}>If you type or dictate a prompt here, `Send` will create the first chat for you automatically.</Text>
+            ) : null}
+            {!store.voiceAvailable ? (
+              <Text style={styles.supportingText}>
+                Voice needs the phone's speech recognition service. Tap the button and the app will explain if Android is missing it.
+              </Text>
+            ) : null}
+            {store.autoSendVoice ? (
+              <Text style={styles.supportingText}>Voice turns send automatically after transcription when Codex is ready.</Text>
+            ) : null}
           </View>
-        </View>
+        </ScrollView>
       )}
 
       {store.error ? <Text style={styles.error}>{store.error}</Text> : null}
@@ -456,6 +612,8 @@ const styles = StyleSheet.create({
   navLabel: { color: "#334155", fontWeight: "700" },
   navLabelActive: { color: "#ffffff" },
   content: { gap: 14, paddingBottom: 28, flexGrow: 1 },
+  screenContent: { flex: 1, gap: 14, paddingBottom: 12, minHeight: 0 },
+  chatScrollContent: { gap: 14, paddingBottom: 20, flexGrow: 1 },
   card: {
     backgroundColor: "rgba(255,255,255,0.82)",
     borderRadius: 24,
@@ -497,6 +655,10 @@ const styles = StyleSheet.create({
     justifyContent: "center"
   },
   secondaryLabel: { color: "#1d4ed8", fontWeight: "800" },
+  warningButton: { backgroundColor: "#fef3c7" },
+  warningButtonLabel: { color: "#92400e" },
+  dangerButton: { backgroundColor: "#fee2e2" },
+  dangerButtonLabel: { color: "#b91c1c" },
   disabledButton: { opacity: 0.45 },
   disconnectButton: {
     alignSelf: "flex-start",
@@ -519,7 +681,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fffdf8"
   },
   list: { gap: 12, paddingBottom: 16 },
-  messages: { flex: 1 },
+  chatSummaryCard: { paddingVertical: 14, gap: 8, flexShrink: 1 },
+  messages: { gap: 12 },
+  chatComposerCard: { marginTop: 4, paddingBottom: 16 },
   messageBubble: {
     borderRadius: 22,
     padding: 14,
@@ -542,5 +706,8 @@ const styles = StyleSheet.create({
     color: "#0f172a",
     backgroundColor: "#fffdf8"
   },
-  actions: { flexDirection: "row", gap: 10 }
+  composerCompact: { minHeight: 72, maxHeight: 120 },
+  actions: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+  chatActions: { flexDirection: "column" },
+  chatActionButton: { width: "100%" }
 });

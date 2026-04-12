@@ -67,6 +67,13 @@ export const chatMessageSchema = z.object({
   updatedAt: z.string().datetime()
 });
 
+export const recentSessionActivitySchema = z.object({
+  session: chatSessionSchema,
+  latestUserMessage: chatMessageSchema.nullable(),
+  latestAssistantMessage: chatMessageSchema.nullable(),
+  lastMessageAt: z.string().datetime().nullable()
+});
+
 export const hostStatusSchema = z.object({
   host: registeredHostSchema,
   auth: hostAuthStateSchema,
@@ -79,7 +86,8 @@ export const gatewayOverviewSchema = z.object({
   hostStatus: hostStatusSchema.nullable(),
   lastSeenDevice: pairedDeviceSchema.nullable(),
   recentDevices: z.array(pairedDeviceSchema),
-  recentSessions: z.array(chatSessionSchema)
+  recentSessions: z.array(chatSessionSchema),
+  recentSessionActivity: z.array(recentSessionActivitySchema)
 });
 
 export const desktopOverviewResponseSchema = z.object({
@@ -98,6 +106,7 @@ export const desktopOverviewResponseSchema = z.object({
 });
 
 export const registerHostRequestSchema = z.object({
+  hostId: z.string().min(1).optional(),
   hostName: z.string().min(1),
   approvedRoots: z.array(z.string().min(1)).min(1)
 });
@@ -122,6 +131,10 @@ export const pairingCompleteResponseSchema = z.object({
 export const createSessionRequestSchema = z.object({
   rootPath: z.string().min(1).optional(),
   title: z.string().min(1).optional()
+});
+
+export const updateSessionRequestSchema = z.object({
+  title: z.string().min(1).max(120)
 });
 
 export const postMessageRequestSchema = z.object({
@@ -211,6 +224,7 @@ export type RegisteredHost = z.infer<typeof registeredHostSchema>;
 export type PairedDevice = z.infer<typeof pairedDeviceSchema>;
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type RecentSessionActivity = z.infer<typeof recentSessionActivitySchema>;
 export type HostStatus = z.infer<typeof hostStatusSchema>;
 export type GatewayOverview = z.infer<typeof gatewayOverviewSchema>;
 export type DesktopOverviewResponse = z.infer<typeof desktopOverviewResponseSchema>;
@@ -219,6 +233,7 @@ export type RegisterHostResponse = z.infer<typeof registerHostResponseSchema>;
 export type PairingCompleteRequest = z.infer<typeof pairingCompleteRequestSchema>;
 export type PairingCompleteResponse = z.infer<typeof pairingCompleteResponseSchema>;
 export type CreateSessionRequest = z.infer<typeof createSessionRequestSchema>;
+export type UpdateSessionRequest = z.infer<typeof updateSessionRequestSchema>;
 export type PostMessageRequest = z.infer<typeof postMessageRequestSchema>;
 export type HostHeartbeatRequest = z.infer<typeof hostHeartbeatRequestSchema>;
 export type HostWorkMessage = z.infer<typeof hostWorkMessageSchema>;

@@ -15,12 +15,15 @@ import type {
   RegisterHostRequest,
   RegisterHostResponse
 } from "../schemas/platform.js";
+import type { UpdateSessionRequest } from "../schemas/platform.js";
 
 export interface MobileApi {
   completePairing(baseUrl: string, pairingCode: string, deviceName: string): Promise<PairingCompleteResponse>;
   getHostStatus(token: string): Promise<HostStatus>;
   listSessions(token: string): Promise<ChatSession[]>;
   createSession(token: string, input: CreateSessionRequest): Promise<ChatSession>;
+  updateSession(token: string, sessionId: string, input: UpdateSessionRequest): Promise<ChatSession>;
+  deleteSession(token: string, sessionId: string): Promise<{ ok: true; deletedSessionId: string }>;
   listMessages(token: string, sessionId: string): Promise<ChatMessage[]>;
   postMessage(token: string, sessionId: string, input: PostMessageRequest): Promise<ChatMessage>;
   stopSession(token: string, sessionId: string): Promise<ChatSession>;

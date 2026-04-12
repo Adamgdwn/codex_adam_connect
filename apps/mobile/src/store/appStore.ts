@@ -6,12 +6,15 @@ import { clearDeviceToken, loadDeviceToken, saveDeviceToken } from "../services/
 import { TtsService } from "../services/voice/ttsService";
 import { VoiceService } from "../services/voice/voiceService";
 import { normalizeBaseUrl, websocketUrlFromBase } from "../config";
+import { DEFAULT_BASE_URL } from "../generated/runtimeConfig";
 
 type View = "host" | "sessions" | "chat";
-type EditableField = "baseUrl" | "deviceName" | "pairingCode" | "composer" | "newSessionRootPath";
+type EditableField = "baseUrl" | "deviceName" | "pairingCode" | "composer" | "newSessionRootPath" | "newSessionTitle";
 
 interface AppState {
   booting: boolean;
+  refreshing: boolean;
+  realtimeConnected: boolean;
   view: View;
   baseUrl: string;
   deviceName: string;
@@ -23,7 +26,10 @@ interface AppState {
   messagesBySession: Record<string, ChatMessage[]>;
   composer: string;
   newSessionRootPath: string;
+  newSessionTitle: string;
+  renameDraftBySession: Record<string, string>;
   autoSpeak: boolean;
+  autoSendVoice: boolean;
   voiceAvailable: boolean;
   listening: boolean;
   lastSpokenMessageId: string | null;
@@ -34,10 +40,14 @@ interface AppState {
   refresh(): Promise<void>;
   selectSession(sessionId: string): Promise<void>;
   createSession(): Promise<void>;
+  renameSession(sessionId: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<void>;
   sendMessage(): Promise<void>;
   stopSession(): Promise<void>;
   toggleAutoSpeak(): Promise<void>;
+  toggleAutoSendVoice(): Promise<void>;
   toggleListening(): Promise<void>;
+  setRenameDraft(sessionId: string, value: string): void;
   setField<K extends EditableField>(field: K, value: AppState[K]): void;
   setView(view: View): void;
 }
@@ -49,8 +59,10 @@ let socket: WebSocket | null = null;
 
 export const useAppStore = create<AppState>((set, get) => ({
   booting: true,
+  refreshing: false,
+  realtimeConnected: false,
   view: "host",
-  baseUrl: "",
+  baseUrl: DEFAULT_BASE_URL,
   deviceName: "Adam's Phone",
   pairingCode: "",
   token: null,
@@ -60,7 +72,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   messagesBySession: {},
   composer: "",
   newSessionRootPath: "",
+  newSessionTitle: "",
+  renameDraftBySession: {},
   autoSpeak: false,
+  autoSendVoice: true,
   voiceAvailable: false,
   listening: false,
   lastSpokenMessageId: null,
@@ -73,11 +88,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     ]);
 
     set({
-      baseUrl: settings?.baseUrl ?? "",
+      baseUrl: settings?.baseUrl ?? DEFAULT_BASE_URL,
       deviceName: settings?.deviceName ?? "Adam's Phone",
       autoSpeak: settings?.autoSpeak ?? false,
+      autoSendVoice: settings?.autoSendVoice ?? true,
       token,
       voiceAvailable,
+      realtimeConnected: false,
       booting: false
     });
 
@@ -89,46 +106,55 @@ export const useAppStore = create<AppState>((set, get) => ({
   async connectPairing() {
     const baseUrl = normalizeBaseUrl(get().baseUrl);
     set({ error: null });
-    const paired = await api.completePairing(baseUrl, get().pairingCode.trim().toUpperCase(), get().deviceName.trim());
-    await saveSettings({
-      baseUrl,
-      deviceName: get().deviceName.trim(),
-      autoSpeak: get().autoSpeak
-    });
-    await saveDeviceToken(paired.deviceToken);
-    set({
-      token: paired.deviceToken,
-      baseUrl,
-      hostStatus: {
-        host: paired.host,
-        auth: { status: "logged_out", detail: "Waiting for desktop heartbeat." },
-        tailscale: {
-          installed: false,
-          connected: false,
-          detail: "Waiting for desktop Tailscale status.",
-          dnsName: null,
-          ipv4: null,
-          suggestedUrl: null,
-          installUrl: "https://tailscale.com/download",
-          loginUrl: "https://login.tailscale.com/start"
+    try {
+      const paired = await api.completePairing(baseUrl, get().pairingCode.trim().toUpperCase(), get().deviceName.trim());
+      await saveSettings({
+        baseUrl,
+        deviceName: get().deviceName.trim(),
+        autoSpeak: get().autoSpeak,
+        autoSendVoice: get().autoSendVoice
+      });
+      await saveDeviceToken(paired.deviceToken);
+      set({
+        token: paired.deviceToken,
+        baseUrl,
+        hostStatus: {
+          host: paired.host,
+          auth: { status: "logged_out", detail: "Waiting for desktop heartbeat." },
+          tailscale: {
+            installed: false,
+            connected: false,
+            detail: "Waiting for desktop Tailscale status.",
+            dnsName: null,
+            ipv4: null,
+            suggestedUrl: null,
+            installUrl: "https://tailscale.com/download",
+            loginUrl: "https://login.tailscale.com/start"
+          },
+          activeSessionCount: 0,
+          pairedDeviceCount: 1
         },
-        activeSessionCount: 0,
-        pairedDeviceCount: 1
-      },
-      pairingCode: "",
-      newSessionRootPath: paired.host.approvedRoots[0] ?? "",
-      view: "host"
-    });
-    connectSocket(baseUrl, paired.deviceToken, set, get);
-    await get().refresh();
+        pairingCode: "",
+        newSessionRootPath: paired.host.approvedRoots[0] ?? "",
+        realtimeConnected: false,
+        view: "host"
+      });
+      connectSocket(baseUrl, paired.deviceToken, set, get);
+      await get().refresh();
+      await ensureOperatorSession(get, set);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Pairing failed. Check the desktop URL and pairing code, then try again."
+      });
+      throw error;
+    }
   },
   async disconnect() {
-    socket?.close();
-    socket = null;
+    disconnectSocket();
     tts.stop();
     await Promise.all([clearSettings(), clearDeviceToken()]);
     set({
-      baseUrl: "",
+      baseUrl: DEFAULT_BASE_URL,
       pairingCode: "",
       token: null,
       hostStatus: null,
@@ -137,7 +163,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       messagesBySession: {},
       composer: "",
       newSessionRootPath: "",
+      newSessionTitle: "",
+      renameDraftBySession: {},
+      autoSendVoice: true,
       lastSpokenMessageId: null,
+      refreshing: false,
+      realtimeConnected: false,
       error: null,
       view: "host"
     });
@@ -145,21 +176,45 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refresh() {
     const token = requireValue(get().token, "Pair this phone with the desktop first.");
     const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const [hostStatus, sessions] = await Promise.all([
-      api.getHostStatus(token, baseUrl),
-      api.listSessions(token, baseUrl)
-    ]);
+    set({ refreshing: true });
+    try {
+      const [hostStatus, sessions] = await Promise.all([
+        api.getHostStatus(token, baseUrl),
+        api.listSessions(token, baseUrl)
+      ]);
+      const currentSelected = get().selectedSessionId;
+      const nextSelected = pickPreferredSessionId(currentSelected, sessions);
 
-    set({
-      hostStatus,
-      sessions,
-      newSessionRootPath: get().newSessionRootPath || hostStatus.host.approvedRoots[0] || "",
-      error: null
-    });
+      set({
+        hostStatus,
+        sessions,
+        selectedSessionId: nextSelected,
+        newSessionRootPath: get().newSessionRootPath || hostStatus.host.approvedRoots[0] || "",
+        renameDraftBySession: sessions.reduce<Record<string, string>>((accumulator, session) => {
+          accumulator[session.id] = get().renameDraftBySession[session.id] ?? session.title;
+          return accumulator;
+        }, {}),
+        error: null
+      });
 
-    const selected = get().selectedSessionId;
-    if (selected) {
-      await get().selectSession(selected);
+      if (nextSelected) {
+        await get().selectSession(nextSelected);
+      } else if (hostStatus.host.approvedRoots[0]) {
+        const operatorSession = await ensureOperatorSession(get, set, {
+          token,
+          baseUrl,
+          hostStatus
+        });
+        if (operatorSession) {
+          await get().selectSession(operatorSession.id);
+        }
+      }
+
+      if (!socket || socket.readyState === WebSocket.CLOSED) {
+        connectSocket(baseUrl, token, set, get);
+      }
+    } finally {
+      set({ refreshing: false });
     }
   },
   async selectSession(sessionId: string) {
@@ -180,32 +235,106 @@ export const useAppStore = create<AppState>((set, get) => ({
     const token = requireValue(get().token, "Pair this phone with the desktop first.");
     const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
     const rootPath = get().newSessionRootPath || get().hostStatus?.host.approvedRoots[0];
+    const title = get().newSessionTitle.trim();
     const session = await api.createSession(token, baseUrl, {
-      rootPath
+      rootPath,
+      ...(title ? { title } : {})
     });
     set((state) => ({
       sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
       selectedSessionId: session.id,
+      newSessionTitle: "",
+      renameDraftBySession: {
+        ...state.renameDraftBySession,
+        [session.id]: session.title
+      },
       view: "chat",
       error: null
     }));
     await get().selectSession(session.id);
   },
+  async renameSession(sessionId: string) {
+    const token = requireValue(get().token, "Pair this phone with the desktop first.");
+    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+    const title = (get().renameDraftBySession[sessionId] ?? "").trim();
+    if (!title) {
+      set({ error: "Chat names cannot be empty." });
+      return;
+    }
+
+    const session = await api.updateSession(token, baseUrl, sessionId, { title });
+    set((state) => ({
+      sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)].sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt)
+      ),
+      renameDraftBySession: {
+        ...state.renameDraftBySession,
+        [session.id]: session.title
+      },
+      error: null
+    }));
+  },
+  async deleteSession(sessionId: string) {
+    const token = requireValue(get().token, "Pair this phone with the desktop first.");
+    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+    await api.deleteSession(token, baseUrl, sessionId);
+
+    set((state) => {
+      const remainingSessions = state.sessions.filter((item) => item.id !== sessionId);
+      const nextSelectedSessionId =
+        state.selectedSessionId === sessionId
+          ? (remainingSessions[0]?.id ?? null)
+          : state.selectedSessionId;
+
+      const nextMessagesBySession = { ...state.messagesBySession };
+      delete nextMessagesBySession[sessionId];
+
+      const nextRenameDrafts = { ...state.renameDraftBySession };
+      delete nextRenameDrafts[sessionId];
+
+      return {
+        sessions: remainingSessions,
+        selectedSessionId: nextSelectedSessionId,
+        messagesBySession: nextMessagesBySession,
+        renameDraftBySession: nextRenameDrafts,
+        view: nextSelectedSessionId ? state.view : "sessions",
+        error: null
+      };
+    });
+
+    const nextSelectedSessionId = get().selectedSessionId;
+    if (nextSelectedSessionId) {
+      await get().selectSession(nextSelectedSessionId);
+    }
+  },
   async sendMessage() {
     const token = requireValue(get().token, "Pair this phone with the desktop first.");
     const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-    const sessionId = requireValue(get().selectedSessionId, "Open a chat before sending a message.");
     const text = get().composer.trim();
     if (!text) {
       return;
     }
 
-    const message = await api.postMessage(token, baseUrl, sessionId, { text });
+    let sessionId = get().selectedSessionId;
+    if (!sessionId) {
+      const operatorSession = await ensureOperatorSession(get, set, {
+        token,
+        baseUrl,
+        hostStatus: get().hostStatus
+      });
+      sessionId = operatorSession?.id ?? pickPreferredSessionId(null, get().sessions);
+      if (sessionId) {
+        await get().selectSession(sessionId);
+      }
+    }
+    const resolvedSessionId = requireValue(sessionId, "Open or start a chat before sending a message.");
+
+    const message = await api.postMessage(token, baseUrl, resolvedSessionId, { text });
     set((state) => ({
       composer: "",
       messagesBySession: {
         ...state.messagesBySession,
-        [sessionId]: [...(state.messagesBySession[sessionId] ?? []), message]
+        [resolvedSessionId]: [...(state.messagesBySession[resolvedSessionId] ?? []), message]
       },
       error: null
     }));
@@ -223,21 +352,63 @@ export const useAppStore = create<AppState>((set, get) => ({
     await saveSettings({
       baseUrl: get().baseUrl,
       deviceName: get().deviceName,
-      autoSpeak: next
+      autoSpeak: next,
+      autoSendVoice: get().autoSendVoice
     });
     set({ autoSpeak: next });
   },
+  async toggleAutoSendVoice() {
+    const next = !get().autoSendVoice;
+    await saveSettings({
+      baseUrl: get().baseUrl,
+      deviceName: get().deviceName,
+      autoSpeak: get().autoSpeak,
+      autoSendVoice: next
+    });
+    set({ autoSendVoice: next });
+  },
   async toggleListening() {
-    if (get().listening) {
-      await voice.stopListening();
-      set({ listening: false });
+    if (!get().voiceAvailable) {
+      set({
+        listening: false,
+        error: "Voice input is not available on this phone yet. Install or enable the device speech recognition service and try again."
+      });
       return;
     }
 
-    await voice.startListening((text) => {
-      set({ composer: text, listening: false });
-    });
-    set({ listening: true });
+    if (get().listening) {
+      await voice.stopListening();
+      set({ listening: false, error: null });
+      return;
+    }
+
+    set({ error: null });
+    try {
+      await voice.startListening(
+        (text) => {
+          set({ composer: text, listening: false, error: null, view: "chat" });
+          void maybeAutoSendVoiceResult(get, set);
+        },
+        (message) => {
+          set({ listening: false, error: message });
+        }
+      );
+      set({ listening: true });
+    } catch (error) {
+      set({
+        listening: false,
+        error: error instanceof Error ? error.message : "Voice recognition could not start."
+      });
+      throw error;
+    }
+  },
+  setRenameDraft(sessionId, value) {
+    set((state) => ({
+      renameDraftBySession: {
+        ...state.renameDraftBySession,
+        [sessionId]: value
+      }
+    }));
   },
   setField(field, value) {
     set({ [field]: value } as Pick<AppState, typeof field>);
@@ -253,10 +424,23 @@ function connectSocket(
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   get: () => AppState
 ): void {
-  socket?.close();
-  socket = new WebSocket(`${websocketUrlFromBase(baseUrl)}?token=${encodeURIComponent(token)}`);
+  disconnectSocket({ keepReconnectIntent: true });
+  shouldReconnect = true;
+  const nextSocket = new WebSocket(`${websocketUrlFromBase(baseUrl)}?token=${encodeURIComponent(token)}`);
+  let dropHandled = false;
+  socket = nextSocket;
 
-  socket.onmessage = (event) => {
+  nextSocket.onopen = () => {
+    if (socket !== nextSocket) {
+      return;
+    }
+    reconnectAttempts = 0;
+    clearReconnectTimer();
+    set({ realtimeConnected: true, error: null });
+    void get().refresh().catch(() => undefined);
+  };
+
+  nextSocket.onmessage = (event) => {
     try {
       const payload = JSON.parse(String(event.data)) as StreamEvent | { type: "hello" };
       if (payload.type === "hello") {
@@ -268,9 +452,68 @@ function connectSocket(
     }
   };
 
-  socket.onerror = () => {
-    set({ error: "Realtime connection dropped. Pull to refresh or reopen the app." });
+  const handleDrop = () => {
+    if (dropHandled || socket !== nextSocket) {
+      return;
+    }
+    dropHandled = true;
+    socket = null;
+    set({
+      realtimeConnected: false,
+      error: "Realtime connection dropped. Reconnecting now. Pull to refresh, tap Refresh Host, or reopen the app if it does not recover."
+    });
+    scheduleReconnect(baseUrl, token, set, get);
   };
+
+  nextSocket.onerror = handleDrop;
+  nextSocket.onclose = handleDrop;
+}
+
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+let shouldReconnect = false;
+
+function disconnectSocket(options?: { keepReconnectIntent?: boolean }): void {
+  clearReconnectTimer();
+  shouldReconnect = options?.keepReconnectIntent ?? false;
+  if (!socket) {
+    return;
+  }
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onerror = null;
+  socket.onclose = null;
+  socket.close();
+  socket = null;
+}
+
+function clearReconnectTimer(): void {
+  if (!reconnectTimer) {
+    return;
+  }
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function scheduleReconnect(
+  baseUrl: string,
+  token: string,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  _get: () => AppState
+): void {
+  if (!shouldReconnect || reconnectTimer) {
+    return;
+  }
+
+  reconnectAttempts += 1;
+  const delayMs = Math.min(10_000, 1_000 * 2 ** Math.min(reconnectAttempts - 1, 3));
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!shouldReconnect) {
+      return;
+    }
+    connectSocket(baseUrl, token, set, _get);
+  }, delayMs);
 }
 
 function applyStreamEvent(
@@ -289,7 +532,11 @@ function applyStreamEvent(
   if (payload.type === "session_upsert") {
     set((state) => ({
       sessions: [payload.session, ...state.sessions.filter((item) => item.id !== payload.session.id)]
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+      renameDraftBySession: {
+        ...state.renameDraftBySession,
+        [payload.session.id]: payload.session.title
+      }
     }));
     return;
   }
@@ -331,4 +578,87 @@ function requireValue<T>(value: T | null | undefined, message: string): T {
     throw new Error(message);
   }
   return value;
+}
+
+const OPERATOR_SESSION_TITLE = "Operator";
+
+function pickPreferredSessionId(currentSelected: string | null, sessions: ChatSession[]): string | null {
+  if (currentSelected && sessions.some((session) => session.id === currentSelected)) {
+    return currentSelected;
+  }
+
+  const operatorSession = findOperatorSession(sessions);
+  return operatorSession?.id ?? sessions[0]?.id ?? null;
+}
+
+function findOperatorSession(sessions: ChatSession[]): ChatSession | undefined {
+  return sessions.find((session) => session.title.trim().toLowerCase() === OPERATOR_SESSION_TITLE.toLowerCase());
+}
+
+async function ensureOperatorSession(
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  options?: {
+    token?: string | null;
+    baseUrl?: string | null;
+    hostStatus?: HostStatus | null;
+  }
+): Promise<ChatSession | null> {
+  const existing = findOperatorSession(get().sessions);
+  if (existing) {
+    return existing;
+  }
+
+  const token = options?.token ?? get().token;
+  const baseUrl = options?.baseUrl ?? get().baseUrl;
+  const hostStatus = options?.hostStatus ?? get().hostStatus;
+  const rootPath = get().newSessionRootPath || hostStatus?.host.approvedRoots[0];
+
+  if (!token || !baseUrl || !rootPath) {
+    return null;
+  }
+
+  const session = await api.createSession(token, baseUrl, {
+    rootPath,
+    title: OPERATOR_SESSION_TITLE
+  });
+
+  set((state) => ({
+    sessions: [session, ...state.sessions.filter((item) => item.id !== session.id)],
+    selectedSessionId: state.selectedSessionId ?? session.id,
+    renameDraftBySession: {
+      ...state.renameDraftBySession,
+      [session.id]: session.title
+    },
+    view: "chat",
+    error: null
+  }));
+
+  return session;
+}
+
+function isSessionBusy(session: ChatSession | null | undefined): boolean {
+  return Boolean(session && (session.status === "queued" || session.status === "running" || session.status === "stopping"));
+}
+
+async function maybeAutoSendVoiceResult(
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+): Promise<void> {
+  if (!get().autoSendVoice) {
+    return;
+  }
+
+  const selectedSession = get().sessions.find((item) => item.id === get().selectedSessionId) ?? findOperatorSession(get().sessions) ?? null;
+  if (isSessionBusy(selectedSession)) {
+    return;
+  }
+
+  try {
+    await get().sendMessage();
+  } catch (error) {
+    set({
+      error: error instanceof Error ? error.message : "Voice captured, but the desktop could not send the message yet."
+    });
+  }
 }

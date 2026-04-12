@@ -19,11 +19,13 @@ import type {
   PairingCompleteResponse,
   PairedDevice,
   PostMessageRequest,
+  RecentSessionActivity,
   RegisterHostRequest,
   RegisterHostResponse,
   RegisteredHost,
   StreamEvent,
-  TailscaleStatus
+  TailscaleStatus,
+  UpdateSessionRequest
 } from "@adam-connect/shared";
 
 interface HostRecord extends RegisteredHost {
@@ -99,10 +101,12 @@ export class GatewayStore {
   async registerHost(input: RegisterHostRequest): Promise<RegisterHostResponse> {
     const state = await this.readState();
     const issuedAt = nowIso();
-    const pairingCode = generatePairingCode();
-    let host = state.hosts.find((item) => item.hostName === input.hostName);
+    let host =
+      (input.hostId ? state.hosts.find((item) => item.id === input.hostId) : null) ??
+      state.hosts.find((item) => item.hostName === input.hostName);
 
     if (!host) {
+      const pairingCode = generatePairingCode();
       host = {
         id: createId("host"),
         hostName: input.hostName,
@@ -119,8 +123,8 @@ export class GatewayStore {
       state.hosts.push(host);
     } else {
       host.approvedRoots = input.approvedRoots;
-      host.pairingCode = pairingCode;
-      host.pairingCodeIssuedAt = issuedAt;
+      host.pairingCode = host.pairingCode || generatePairingCode();
+      host.pairingCodeIssuedAt = host.pairingCodeIssuedAt || issuedAt;
       host.lastSeenAt = issuedAt;
       host.isOnline = true;
       host.hostToken = createId("hosttoken");
@@ -157,6 +161,7 @@ export class GatewayStore {
         deviceToken: createId("devicetoken")
       };
       state.devices.push(device);
+      this.recoverSiblingSessions(state, host, device);
     } else {
       device.lastSeenAt = now;
       device.deviceToken = createId("devicetoken");
@@ -238,6 +243,35 @@ export class GatewayStore {
     await this.writeState(state);
     this.emitSession(session);
     return toPublicSession(session);
+  }
+
+  async updateSession(token: string, sessionId: string, input: UpdateSessionRequest): Promise<ChatSession> {
+    const principal = await this.requireDevice(token);
+    const session = await this.requireSessionForDevice(sessionId, principal.device.id);
+    const state = await this.readState();
+    const targetSession = state.sessions.find((item) => item.id === session.id);
+    if (!targetSession) {
+      throw new Error("Session not found.");
+    }
+
+    targetSession.title = input.title.trim();
+    targetSession.updatedAt = nowIso();
+
+    await this.writeState(state);
+    this.emitSession(targetSession);
+    return toPublicSession(targetSession);
+  }
+
+  async deleteSession(token: string, sessionId: string): Promise<{ ok: true; deletedSessionId: string }> {
+    const principal = await this.requireDevice(token);
+    const session = await this.requireSessionForDevice(sessionId, principal.device.id);
+    const state = await this.readState();
+
+    state.sessions = state.sessions.filter((item) => item.id !== session.id);
+    state.messages = state.messages.filter((item) => item.sessionId !== session.id);
+
+    await this.writeState(state);
+    return { ok: true, deletedSessionId: session.id };
   }
 
   async listMessages(token: string, sessionId: string): Promise<ChatMessage[]> {
@@ -439,7 +473,14 @@ export class GatewayStore {
     const principal = await this.requireHost(token);
     const state = await this.readState();
     const session = this.requireSessionForHostState(state, input.sessionId, principal.host.id);
+    const userMessage = this.requireMessage(state, input.userMessageId, session.id);
     let assistantMessage: ChatMessage | null = null;
+
+    if (userMessage.status === "pending") {
+      userMessage.status = "failed";
+      userMessage.updatedAt = nowIso();
+      userMessage.errorMessage = input.errorMessage;
+    }
 
     if (input.assistantMessageId) {
       assistantMessage = this.requireMessage(state, input.assistantMessageId, session.id);
@@ -464,11 +505,13 @@ export class GatewayStore {
     session.activeTurnId = null;
     session.status = "error";
     session.stopRequested = false;
+    session.claimedMessageId = null;
     session.stopClaimedAt = null;
     session.lastError = input.errorMessage;
     session.updatedAt = nowIso();
 
     await this.writeState(state);
+    this.emitMessage(principal.host.id, userMessage);
     this.emitMessage(principal.host.id, assistantMessage);
     this.emitSession(session);
     return toPublicSession(session);
@@ -506,7 +549,8 @@ export class GatewayStore {
         hostStatus: null,
         lastSeenDevice: null,
         recentDevices: [],
-        recentSessions: []
+        recentSessions: [],
+        recentSessionActivity: []
       };
     }
 
@@ -515,17 +559,32 @@ export class GatewayStore {
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
       .slice(0, 4);
 
-    const recentSessions = [...state.sessions]
+    const recentSessionRecords = [...state.sessions]
       .filter((item) => item.hostId === host.id)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-      .slice(0, 6)
-      .map(toPublicSession);
+      .slice(0, 6);
+
+    const recentSessionActivity = recentSessionRecords.map((session): RecentSessionActivity => {
+      const sessionMessages = state.messages
+        .filter((item) => item.sessionId === session.id)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+
+      return {
+        session: toPublicSession(session),
+        latestUserMessage: sessionMessages.find((item) => item.role === "user") ?? null,
+        latestAssistantMessage: sessionMessages.find((item) => item.role === "assistant") ?? null,
+        lastMessageAt: sessionMessages[0]?.updatedAt ?? null
+      };
+    });
+
+    const recentSessions = recentSessionActivity.map((item) => item.session);
 
     return {
       hostStatus: await this.buildHostStatus(host.id),
       lastSeenDevice: recentDevices[0] ? toPublicDevice(recentDevices[0]) : null,
       recentDevices: recentDevices.map(toPublicDevice),
-      recentSessions
+      recentSessions,
+      recentSessionActivity
     };
   }
 
@@ -666,6 +725,40 @@ export class GatewayStore {
     await mkdir(this.dataDir, { recursive: true });
     await writeFile(this.dataFile, JSON.stringify(state, null, 2), "utf8");
   }
+
+  private recoverSiblingSessions(state: GatewayState, host: HostRecord, device: DeviceRecord): void {
+    const siblingHosts = state.hosts.filter(
+      (item) =>
+        item.id !== host.id &&
+        !item.isOnline &&
+        hostsLookEquivalent(item, host)
+    );
+
+    if (!siblingHosts.length) {
+      return;
+    }
+
+    const siblingHostIds = new Set(siblingHosts.map((item) => item.id));
+    const siblingDevices = state.devices.filter(
+      (item) => siblingHostIds.has(item.hostId) && item.deviceName === device.deviceName
+    );
+
+    if (!siblingDevices.length) {
+      return;
+    }
+
+    const siblingDeviceIds = new Set(siblingDevices.map((item) => item.id));
+    const recoveredAt = nowIso();
+
+    for (const session of state.sessions) {
+      if (!siblingDeviceIds.has(session.deviceId)) {
+        continue;
+      }
+      session.hostId = host.id;
+      session.deviceId = device.id;
+      session.updatedAt = recoveredAt;
+    }
+  }
 }
 
 function toPublicHost(host: HostRecord): RegisteredHost {
@@ -710,4 +803,27 @@ function toPublicSession(session: SessionRecord): ChatSession {
 
 function isRecent(iso: string, thresholdMs: number): boolean {
   return Date.now() - new Date(iso).getTime() < thresholdMs;
+}
+
+function hostsLookEquivalent(left: HostRecord, right: HostRecord): boolean {
+  const sameDnsName =
+    left.tailscale.dnsName &&
+    right.tailscale.dnsName &&
+    left.tailscale.dnsName === right.tailscale.dnsName;
+
+  if (sameDnsName) {
+    return true;
+  }
+
+  return sameRoots(left.approvedRoots, right.approvedRoots);
+}
+
+function sameRoots(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.every((value, index) => value === rightSorted[index]);
 }

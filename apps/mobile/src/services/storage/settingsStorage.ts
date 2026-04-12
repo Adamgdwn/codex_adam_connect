@@ -6,6 +6,7 @@ export interface StoredSettings {
   baseUrl: string;
   deviceName: string;
   autoSpeak: boolean;
+  autoSendVoice: boolean;
 }
 
 export async function loadSettings(): Promise<StoredSettings | null> {

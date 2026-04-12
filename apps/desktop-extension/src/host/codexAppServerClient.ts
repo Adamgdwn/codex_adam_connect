@@ -43,43 +43,36 @@ export class CodexAppServerClient extends EventEmitter {
       return;
     }
 
-    const child = spawn(this.codexBin, ["app-server", "--listen", this.listenUrl], {
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    this.process = child;
+    try {
+      await this.attachSocket(await this.connect());
+      return;
+    } catch {
+      // Fall through and launch a managed app-server for this host process.
+    }
 
-    child.stdout?.on("data", (chunk) => {
-      this.emit("log", chunk.toString("utf8"));
-    });
+    if (!this.process) {
+      const child = spawn(this.codexBin, ["app-server", "--listen", this.listenUrl], {
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      this.process = child;
 
-    child.stderr?.on("data", (chunk) => {
-      this.emit("log", chunk.toString("utf8"));
-    });
+      child.stdout?.on("data", (chunk) => {
+        this.emit("log", chunk.toString("utf8"));
+      });
 
-    child.on("exit", (code) => {
-      this.emit("exit", code ?? 0);
-      this.rejectPending(new Error("Codex app-server exited."));
-      this.socket = null;
-      this.process = null;
-    });
+      child.stderr?.on("data", (chunk) => {
+        this.emit("log", chunk.toString("utf8"));
+      });
 
-    this.socket = await this.connect();
-    this.socket.on("message", (chunk) => {
-      this.handleMessage(chunk.toString());
-    });
-    this.socket.on("close", () => {
-      this.rejectPending(new Error("Codex app-server connection closed."));
-      this.socket = null;
-    });
+      child.on("exit", (code) => {
+        this.emit("exit", code ?? 0);
+        this.rejectPending(new Error("Codex app-server exited."));
+        this.socket = null;
+        this.process = null;
+      });
+    }
 
-    await this.request("initialize", {
-      clientInfo: {
-        name: "adam-connect-host",
-        version: "0.3.0"
-      },
-      capabilities: null
-    });
-    this.notify("initialized");
+    await this.attachSocket(await this.connect());
   }
 
   async stop(): Promise<void> {
@@ -128,6 +121,26 @@ export class CodexAppServerClient extends EventEmitter {
       throw new Error("Codex app-server is not connected.");
     }
     return this.socket;
+  }
+
+  private async attachSocket(socket: WebSocket): Promise<void> {
+    this.socket = socket;
+    this.socket.on("message", (chunk) => {
+      this.handleMessage(chunk.toString());
+    });
+    this.socket.on("close", () => {
+      this.rejectPending(new Error("Codex app-server connection closed."));
+      this.socket = null;
+    });
+
+    await this.request("initialize", {
+      clientInfo: {
+        name: "adam-connect-host",
+        version: "0.3.0"
+      },
+      capabilities: null
+    });
+    this.notify("initialized");
   }
 
   private async connect(): Promise<WebSocket> {

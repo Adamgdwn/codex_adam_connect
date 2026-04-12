@@ -75,10 +75,18 @@ Typical desktop URLs are:
 ## Pair The Phone
 
 1. Open Adam Connect on the phone.
-2. Enter the desktop URL shown by the host or install page.
+2. Confirm the desktop URL shown by the host or install page.
+   The app now pre-fills the desktop URL on builds produced from this desktop, so you usually only need to change it if you are pairing against a different host.
 3. Enter the current pairing code.
 4. Tap `Pair Phone`.
 5. Wait for the host status screen to load.
+6. Adam Connect will create a default `Operator` chat automatically the first time you refresh or send a prompt.
+
+Notes:
+- The QR code is optional. The real pairing inputs are the desktop URL and pairing code.
+- After pairing, the phone stores a long-lived device token.
+- That means normal day-to-day use should not require repairing unless you reinstall the app, clear app storage, or move to a new phone.
+- The pairing code now stays stable across normal desktop restarts, so remote recovery is less fragile.
 
 The current desktop URL is usually shown near the top of the desktop dashboard and on the phone install page, for example:
 
@@ -88,8 +96,8 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 
 1. Open the `Chats` tab.
 2. Pick an approved workspace root.
-3. Tap `Start Chat`.
-4. Open the chat and type a prompt, or use `Push To Talk`.
+3. Tap `Start Chat`, or just use the default `Operator` chat.
+4. Open the chat and type a prompt, or use `Talk To Codex`.
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
@@ -98,7 +106,7 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
 - `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
 - `Chats`: create or reopen persistent chat sessions tied to approved desktop roots.
-- `Chat`: send messages, use push-to-talk, watch streamed replies, and stop active runs.
+- `Chat`: send messages, use voice transcription, watch streamed replies, and stop active runs.
 
 ## Troubleshooting
 
@@ -107,6 +115,8 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 - If the Android APK download works but installation is blocked, allow installs from the browser you used to download it.
 - If the phone pairs but replies do not appear, check the terminal running `npm run launch`.
 - If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
+- If push-to-talk says voice input is unavailable, confirm the phone has a speech recognition service enabled and set as the default Android voice service.
+- If a voice turn transcribes but does not send, check whether `Auto-send voice turns` is enabled on the `Host` screen.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use

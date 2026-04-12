@@ -12,7 +12,8 @@ import {
   hostStartTurnRequestSchema,
   pairingCompleteRequestSchema,
   postMessageRequestSchema,
-  registerHostRequestSchema
+  registerHostRequestSchema,
+  updateSessionRequestSchema
 } from "@adam-connect/shared";
 import { WebSocketServer } from "ws";
 import {
@@ -25,7 +26,9 @@ import {
 } from "./installPage.js";
 import { GatewayStore } from "./store.js";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+for (const envPath of [path.resolve(process.cwd(), ".env"), path.resolve(process.cwd(), "../../.env")]) {
+  dotenv.config({ path: envPath, override: false });
+}
 
 const port = Number(process.env.GATEWAY_PORT ?? 43111);
 const host = process.env.GATEWAY_HOST ?? "0.0.0.0";
@@ -206,6 +209,19 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && url.pathname === "/sessions") {
       const parsed = createSessionRequestSchema.parse(await readJson(req));
       sendJson(res, 200, await store.createSession(readBearer(req), parsed));
+      return;
+    }
+
+    if (method === "PATCH" && /^\/sessions\/[^/]+$/.test(url.pathname)) {
+      const sessionId = url.pathname.split("/")[2];
+      const parsed = updateSessionRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.updateSession(readBearer(req), sessionId, parsed));
+      return;
+    }
+
+    if (method === "DELETE" && /^\/sessions\/[^/]+$/.test(url.pathname)) {
+      const sessionId = url.pathname.split("/")[2];
+      sendJson(res, 200, await store.deleteSession(readBearer(req), sessionId));
       return;
     }
 

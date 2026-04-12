@@ -47,6 +47,7 @@ See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATU
 
 - copy `.env.example` to `.env`
 - set `DESKTOP_APPROVED_ROOTS` to one or more absolute roots
+- optionally set `MOBILE_DEFAULT_BASE_URL` to prefill the desktop URL in local mobile builds
 - launch the desktop app with `npm run launch`
 - the launcher opens `http://127.0.0.1:43111/` automatically as the desktop dashboard
 - optional on Linux: install a menu launcher with `npm run app:desktop:install-launcher`

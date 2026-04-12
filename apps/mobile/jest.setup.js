@@ -20,15 +20,27 @@ jest.mock('react-native-keychain', () => ({
   resetGenericPassword: jest.fn(async () => undefined),
 }));
 
-jest.mock('@react-native-voice/voice', () => ({
-  default: {
-    onSpeechError: null,
-    onSpeechResults: null,
-    start: jest.fn(async () => undefined),
-    stop: jest.fn(async () => undefined),
-    destroy: jest.fn(async () => undefined),
-  },
-}));
+jest.mock('expo-speech-recognition', () => {
+  const listeners = new Map();
+
+  return {
+    ExpoSpeechRecognitionModule: {
+      addListener: jest.fn((eventName, handler) => {
+        listeners.set(eventName, handler);
+        return {
+          remove: jest.fn(() => listeners.delete(eventName)),
+        };
+      }),
+      requestPermissionsAsync: jest.fn(async () => ({granted: true})),
+      isRecognitionAvailable: jest.fn(() => true),
+      getSpeechRecognitionServices: jest.fn(() => ['com.google.android.tts']),
+      getDefaultRecognitionService: jest.fn(() => ({packageName: 'com.google.android.tts'})),
+      start: jest.fn(() => undefined),
+      stop: jest.fn(() => undefined),
+      abort: jest.fn(() => undefined),
+    },
+  };
+});
 
 jest.mock('react-native-tts', () => ({
   default: {

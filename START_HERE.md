@@ -51,6 +51,7 @@ npm install
 Fill `.env`:
 
 - `DESKTOP_APPROVED_ROOTS`
+- optional: `MOBILE_DEFAULT_BASE_URL`
 - optional: `GATEWAY_HOST`
 - optional: `GATEWAY_ANDROID_APK_PATH`
 - optional: `DESKTOP_GATEWAY_URL`

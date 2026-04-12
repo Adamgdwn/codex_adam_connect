@@ -8,7 +8,9 @@ import { CodexBridge } from "./codexBridge.js";
 import { HostStateStore } from "./store.js";
 import { getTailscaleStatus } from "./tailscale.js";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+for (const envPath of [path.resolve(process.cwd(), ".env"), path.resolve(process.cwd(), "../../.env")]) {
+  dotenv.config({ path: envPath, override: false });
+}
 
 interface ActiveRun {
   sessionId: string;
@@ -32,13 +34,18 @@ export class DesktopHostRuntime {
   private ticking = false;
 
   async start(): Promise<void> {
-    const hostName = process.env.DESKTOP_HOST_NAME ?? "Workstation Main";
+    const localState = await this.stateStore.read();
+    const hostName = process.env.DESKTOP_HOST_NAME ?? localState.hostName ?? "Adam Connect Desktop";
     const approvedRoots = await resolveApprovedRoots(parseRoots(process.env.DESKTOP_APPROVED_ROOTS));
 
     await this.codexBridge.start();
     const auth = await this.codexBridge.getAuthState();
     const tailscale = await getTailscaleStatus(Number(new URL(this.gatewayUrl).port || 43111));
-    const registration = await this.gateway.registerHost({ hostName, approvedRoots });
+    const registration = await this.gateway.registerHost({
+      hostId: localState.hostId ?? undefined,
+      hostName,
+      approvedRoots
+    });
 
     this.hostToken = registration.hostToken;
     this.hostId = registration.host.id;
@@ -152,6 +159,7 @@ export class DesktopHostRuntime {
       return;
     }
 
+    await this.codexBridge.start();
     const auth = await this.codexBridge.getAuthState();
     const tailscale = await getTailscaleStatus(Number(new URL(this.gatewayUrl).port || 43111));
     await this.gateway.heartbeat(this.hostToken, { auth, tailscale });
@@ -172,36 +180,49 @@ export class DesktopHostRuntime {
     let started = false;
 
     try {
-      const result = await this.codexBridge.runTurn({
-        cwd: work.session.rootPath,
-        threadId: work.session.threadId,
-        text: work.message.content,
-        onTurnStarted: async ({ threadId, turnId }) => {
-          this.activeRun = {
-            sessionId: work.session.id,
-            userMessageId: work.message.id,
-            assistantMessageId,
-            threadId,
-            turnId,
-            interrupting: false
-          };
-          started = true;
-          await this.gateway.startTurn(this.hostToken as string, {
-            sessionId: work.session.id,
-            userMessageId: work.message.id,
-            threadId,
-            turnId,
-            assistantMessageId
-          });
-        },
-        onDelta: async (delta) => {
-          await this.gateway.appendAssistantDelta(this.hostToken as string, {
-            sessionId: work.session.id,
-            assistantMessageId,
-            delta
-          });
+      const runTurn = async (threadId: string | null) =>
+        this.codexBridge.runTurn({
+          cwd: work.session.rootPath,
+          threadId,
+          text: work.message.content,
+          onTurnStarted: async ({ threadId: nextThreadId, turnId }) => {
+            this.activeRun = {
+              sessionId: work.session.id,
+              userMessageId: work.message.id,
+              assistantMessageId,
+              threadId: nextThreadId,
+              turnId,
+              interrupting: false
+            };
+            started = true;
+            await this.gateway.startTurn(this.hostToken as string, {
+              sessionId: work.session.id,
+              userMessageId: work.message.id,
+              threadId: nextThreadId,
+              turnId,
+              assistantMessageId
+            });
+          },
+          onDelta: async (delta) => {
+            await this.gateway.appendAssistantDelta(this.hostToken as string, {
+              sessionId: work.session.id,
+              assistantMessageId,
+              delta
+            });
+          }
+        });
+
+      let result;
+      try {
+        result = await runTurn(work.session.threadId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Codex run failed.";
+        if (!started && work.session.threadId && isMissingThreadError(message)) {
+          result = await runTurn(null);
+        } else {
+          throw error;
         }
-      });
+      }
 
       if (this.activeRun?.interrupting) {
         await this.gateway.interruptTurn(this.hostToken, {
@@ -240,6 +261,10 @@ export class DesktopHostRuntime {
       this.activeRun = null;
     }
   }
+}
+
+function isMissingThreadError(message: string): boolean {
+  return /thread not found/i.test(message);
 }
 
 function parseRoots(raw: string | undefined): string[] {
