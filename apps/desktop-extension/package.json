@@ -1,0 +1,48 @@
+{
+  "name": "@adam-connect/desktop-extension",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/extension/extension.js",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:adamConnect.showHostStatus",
+    "onCommand:adamConnect.copyPairingCode"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "adamConnect.showHostStatus",
+        "title": "Adam Connect: Show Host Status"
+      },
+      {
+        "command": "adamConnect.copyPairingCode",
+        "title": "Adam Connect: Copy Pairing Code"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc -b tsconfig.json",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "lint": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "dev": "node ../../node_modules/tsx/dist/cli.mjs src/host/cli.ts",
+    "start": "node dist/host/cli.js"
+  },
+  "dependencies": {
+    "@adam-connect/core": "0.2.0",
+    "@adam-connect/provider-adapters": "0.2.0",
+    "@adam-connect/shared": "0.2.0",
+    "dotenv": "^16.4.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.96.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

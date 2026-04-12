@@ -1,0 +1,29 @@
+# Risk Register
+
+## Current Risk Classification
+
+- Tier: Medium
+- Owner: Adam Goodwin
+- Last reviewed: 2026-04-11
+
+## Key Risks
+
+| ID | Risk | Likelihood | Impact | Controls | Owner | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| R-001 | Remote phone control could target the wrong workspace | Medium | High | Session creation is limited to approved desktop roots | Owner | Open |
+| R-002 | Codex login expires and the phone appears broken | Medium | Medium | Host heartbeat reports auth state and recovery command | Owner | Open |
+| R-003 | Device token theft would allow remote access to the paired host | Low | High | Pairing is private-network only and mobile stores the token in device keychain | Owner | Open |
+| R-004 | Experimental Codex app-server protocol changes could break the bridge | Medium | Medium | Keep Codex protocol details isolated inside the desktop bridge | Owner | Open |
+| R-005 | Desktop-surface drift could confuse users if the browser dashboard and native-shell scaffold diverge | Medium | Medium | Keep the browser dashboard as the single supported path until the native-shell runtime is proven | Owner | Open |
+
+## Checkpoint Review
+
+### Completed
+
+- the supported desktop path is now clear: browser dashboard plus launcher
+- Linux desktop launcher installation reduces day-to-day friction without changing the trust model
+
+### Next
+
+- reassess this register after the desktop-surface decision is made
+- either promote the native shell into supported operations or remove the ambiguity

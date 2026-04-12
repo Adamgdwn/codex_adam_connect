@@ -1,0 +1,28 @@
+{
+  "name": "@adam-connect/gateway",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc -b tsconfig.json",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "lint": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "dev": "node ../../node_modules/tsx/dist/cli.mjs src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@adam-connect/core": "0.2.0",
+    "@adam-connect/shared": "0.2.0",
+    "dotenv": "^16.4.7",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}

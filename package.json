@@ -1,0 +1,30 @@
+{
+  "name": "adam-connect-platform",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-first AI operator platform monorepo.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node ./node_modules/typescript/bin/tsc -b tsconfig.json && npm run build --workspace @adam-connect/mobile",
+    "app:desktop": "npm run launch",
+    "app:desktop:start": "npm run launch:no-open",
+    "app:desktop:install-launcher": "node scripts/install-linux-launcher.mjs",
+    "build:android-debug": "bash scripts/build-android-debug.sh",
+    "launch": "node scripts/launch-adam-connect.mjs",
+    "launch:no-open": "node scripts/launch-adam-connect.mjs --no-open",
+    "typecheck": "node ./node_modules/typescript/bin/tsc -b tsconfig.json --pretty false && npm run typecheck --workspace @adam-connect/mobile",
+    "lint": "npm run lint --workspace @adam-connect/mobile && npm run lint --workspace @adam-connect/desktop-extension && npm run lint --workspace @adam-connect/gateway && npm run lint --workspace @adam-connect/desktop-shell",
+    "test": "npm run test --workspace @adam-connect/mobile -- --runInBand",
+    "dev:desktop": "npm run dev --workspace @adam-connect/desktop-extension",
+    "dev:desktop-stack": "node scripts/dev-desktop-stack.mjs",
+    "dev:gateway": "npm run dev --workspace @adam-connect/gateway",
+    "dev:mobile": "npm run start --workspace @adam-connect/mobile",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

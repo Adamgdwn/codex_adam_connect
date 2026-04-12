@@ -1,0 +1,7 @@
+Adam Connect is a local-first AI operator platform.
+
+The desktop host is the authority boundary. It validates approved roots,
+reads local files, and calls the summarization provider.
+
+The mobile app signs in, pairs with the host, submits summarize_file,
+and polls command history and lifecycle state from the gateway.
