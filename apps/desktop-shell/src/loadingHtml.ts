@@ -40,12 +40,12 @@ export function renderLoadingHtml(title: string, message: string, detail?: strin
       }
 
       .card {
-        width: min(92vw, 720px);
-        padding: 38px 34px;
-        border-radius: 28px;
+        width: min(90vw, 620px);
+        padding: 28px 26px;
+        border-radius: 22px;
         border: 1px solid rgba(17, 36, 62, 0.12);
         background: rgba(255, 255, 255, 0.82);
-        box-shadow: 0 24px 58px rgba(17, 36, 62, 0.16);
+        box-shadow: 0 18px 42px rgba(17, 36, 62, 0.14);
         backdrop-filter: blur(18px);
       }
 
@@ -64,35 +64,39 @@ export function renderLoadingHtml(title: string, message: string, detail?: strin
       }
 
       h1 {
-        margin: 18px 0 12px;
-        font-size: clamp(2rem, 4vw, 3.6rem);
-        line-height: 0.96;
+        margin: 14px 0 10px;
+        font-size: clamp(1.65rem, 2.8vw, 2.7rem);
+        line-height: 1.02;
       }
 
       p {
         margin: 0;
         color: var(--muted);
-        line-height: 1.7;
-        font-size: 1.02rem;
+        line-height: 1.55;
+        font-size: 0.96rem;
       }
 
       .detail {
-        margin-top: 18px;
-        padding: 14px 16px;
-        border-radius: 18px;
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 16px;
         background: rgba(17, 36, 62, 0.06);
         color: var(--navy-soft);
         font-family: "JetBrains Mono", monospace;
+        font-size: 0.85rem;
+        line-height: 1.45;
+        max-height: 180px;
+        overflow: auto;
         word-break: break-word;
       }
 
       .spinner {
         display: inline-flex;
-        width: 56px;
-        height: 56px;
-        margin-top: 26px;
+        width: 42px;
+        height: 42px;
+        margin-top: 20px;
         border-radius: 999px;
-        border: 4px solid rgba(17, 36, 62, 0.12);
+        border: 3px solid rgba(17, 36, 62, 0.12);
         border-top-color: var(--orange);
         animation: spin 900ms linear infinite;
       }

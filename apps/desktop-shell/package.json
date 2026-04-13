@@ -7,8 +7,8 @@
     "build": "node ../../node_modules/typescript/bin/tsc -b tsconfig.json",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "lint": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
-    "start": "electron dist/main.js",
-    "dev": "node ../../node_modules/typescript/bin/tsc -b tsconfig.json && electron dist/main.js"
+    "start": "node ../../scripts/run-electron-shell.mjs dist/main.js",
+    "dev": "node ../../node_modules/typescript/bin/tsc -b tsconfig.json && node ../../scripts/run-electron-shell.mjs dist/main.js"
   },
   "dependencies": {
     "@adam-connect/shared": "0.2.0"

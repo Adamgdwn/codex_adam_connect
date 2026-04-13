@@ -1,6 +1,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 import { createId } from "@adam-connect/core";
+import { buildTurnPrompt } from "@adam-connect/shared";
 import type { HostWorkMessage } from "@adam-connect/shared";
 import { HttpGatewayClient } from "../services/gatewayClient.js";
 import { resolveApprovedRoots } from "./approvedRoots.js";
@@ -140,12 +141,33 @@ export class DesktopHostRuntime {
           !this.activeRun.interrupting
         ) {
           this.activeRun.interrupting = true;
-          await this.codexBridge.interrupt(this.activeRun.threadId, this.activeRun.turnId);
+          try {
+            await this.codexBridge.interrupt(this.activeRun.threadId, this.activeRun.turnId);
+          } catch {
+            // Let the gateway reclaim and retry the stop request instead of wedging this run forever.
+            this.activeRun.interrupting = false;
+          }
         }
         return;
       }
 
       const work = await this.gateway.getNextWork(this.hostToken);
+      if (work?.type === "interrupt") {
+        await this.codexBridge.start();
+        if (work.session.threadId) {
+          try {
+            await this.codexBridge.interrupt(work.session.threadId, work.turnId);
+          } catch {
+            // If the desktop lost the live turn handle, still clear the stale session state in the gateway.
+          }
+        }
+        await this.gateway.interruptTurn(this.hostToken, {
+          sessionId: work.session.id,
+          assistantMessageId: null,
+          turnId: work.turnId
+        });
+        return;
+      }
       if (work?.type === "message") {
         void this.processMessage(work);
       }
@@ -184,7 +206,16 @@ export class DesktopHostRuntime {
         this.codexBridge.runTurn({
           cwd: work.session.rootPath,
           threadId,
-          text: work.message.content,
+          sessionTitle: work.session.title,
+          sessionKind: work.session.kind,
+          text: buildTurnPrompt({
+            sessionTitle: work.session.title,
+            sessionKind: work.session.kind,
+            userText: work.message.content,
+            responseStyle: work.message.responseStyle,
+            inputMode: work.message.inputMode,
+            transcriptPolished: work.message.transcriptPolished
+          }),
           onTurnStarted: async ({ threadId: nextThreadId, turnId }) => {
             this.activeRun = {
               sessionId: work.session.id,

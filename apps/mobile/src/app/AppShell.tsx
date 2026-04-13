@@ -4,6 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { Banner, StatusChip } from "./components";
 import { styles } from "./mobileStyles";
 import { ChatScreen, HostScreen, PairingScreen, SessionsScreen } from "./screens";
+import type { AppState } from "../store/appStore";
 import { useAppStore } from "../store/appStore";
 
 export function AppShell(): React.JSX.Element {
@@ -12,6 +13,7 @@ export function AppShell(): React.JSX.Element {
   const setField = useAppStore((state) => state.setField);
   const selectSession = useAppStore((state) => state.selectSession);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [controlsExpanded, setControlsExpanded] = useState(store.view !== "chat");
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -47,6 +49,12 @@ export function AppShell(): React.JSX.Element {
     selectSession(store.selectedSessionId).catch((error) => console.warn(error));
   }, [selectSession, selectedMessageCount, store.selectedSessionId, store.token]);
 
+  useEffect(() => {
+    if (store.view === "chat") {
+      setControlsExpanded(false);
+    }
+  }, [store.view]);
+
   if (store.booting) {
     return (
       <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
@@ -69,11 +77,17 @@ export function AppShell(): React.JSX.Element {
 
   const keyboardInset = store.view === "sessions" || store.view === "chat" ? keyboardHeight : 0;
   const screenBottomPadding = Math.max(insets.bottom, 16) + keyboardInset + 12;
-  const composerBottomPadding = Math.max(insets.bottom, 12);
+  const composerBottomPadding = Math.max(insets.bottom, 8);
 
   const handleRefresh = () => {
     store.refresh().catch((error) => console.warn(error));
   };
+  const refreshLabel = store.refreshing ? "Refreshing..." : "Refresh";
+  const talkLabel = store.listening ? "Stop Mic" : store.autoSendVoice ? "Talk To Codex" : "Push To Talk";
+  const controlsLabel = controlsExpanded ? "Hide Controls" : "Show Controls";
+  const voiceStatus = humanizeVoiceStatus(store);
+  const chatHeaderSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? store.sessions[0] ?? null;
+  const isChatView = store.view === "chat";
 
   const handleNavPress = (view: "host" | "sessions" | "chat") => {
     if (view !== "chat") {
@@ -90,42 +104,125 @@ export function AppShell(): React.JSX.Element {
     store.setView("chat");
   };
 
+  const handleTalkPress = () => {
+    if (store.view !== "chat") {
+      store.setView("chat");
+    }
+    store.toggleListening().catch((error) => console.warn(error));
+  };
+
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.eyebrow}>Private Operator Link</Text>
-          <Text style={styles.brand}>Adam Connect</Text>
-          <Text style={styles.subtitle}>{store.hostStatus?.host.hostName ?? "Desktop host"}</Text>
-        </View>
-        <Pressable
-          style={styles.disconnectButton}
-          onPress={() => {
-            store.disconnect().catch((error) => console.warn(error));
-          }}
-        >
-          <Text style={styles.disconnectLabel}>Disconnect</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.topPanel}>
-        <View style={styles.statusRow}>
-          <StatusChip label={store.hostStatus?.host.isOnline ? "Host online" : "Host offline"} tone={store.hostStatus?.host.isOnline ? "teal" : "orange"} />
-          <StatusChip label={humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} tone={store.hostStatus?.auth.status === "logged_in" ? "teal" : "orange"} />
-          <StatusChip label={store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"} tone={store.realtimeConnected ? "teal" : "orange"} />
-        </View>
-        <View style={styles.nav}>
-          {(["host", "sessions", "chat"] as const).map((view) => (
-            <Pressable
-              key={view}
-              style={[styles.navButton, store.view === view ? styles.navButtonActive : null]}
-              onPress={() => handleNavPress(view)}
-            >
-              <Text style={[styles.navLabel, store.view === view ? styles.navLabelActive : null]}>{labelForView(view)}</Text>
+      {isChatView ? (
+        <View style={[styles.header, styles.chatAppHeader]}>
+          <View style={styles.chatAppHeaderCopy}>
+            <Text style={styles.chatAppHeaderTitle}>{chatHeaderSession?.title ?? "Chat"}</Text>
+            <Text style={styles.chatAppHeaderSubtitle}>
+              {humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · {store.realtimeConnected ? "Live sync on" : "Reconnecting"}
+            </Text>
+          </View>
+          <View style={styles.chatAppHeaderActions}>
+            <Pressable style={[styles.iconButton, store.refreshing ? styles.disabledButton : null]} onPress={handleRefresh} disabled={store.refreshing}>
+              <Text style={styles.iconButtonLabel}>↻</Text>
             </Pressable>
-          ))}
+            <Pressable
+              style={[styles.iconButton, !store.voiceAvailable ? styles.warningIconButton : null]}
+              onPress={handleTalkPress}
+            >
+              <Text style={[styles.iconButtonLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>
+                {store.listening ? "Stop" : "Talk"}
+              </Text>
+            </Pressable>
+            <Pressable testID="controls-toggle" style={styles.iconButton} onPress={() => setControlsExpanded((value) => !value)}>
+              <Text style={styles.iconButtonLabel}>⚙</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={styles.header}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.eyebrow}>Private Operator Link</Text>
+            <Text style={styles.brand}>Adam Connect</Text>
+            <Text style={styles.subtitle}>{store.hostStatus?.host.hostName ?? "Desktop host"}</Text>
+            <View style={styles.headerMetaRow}>
+              <Pressable
+                testID="controls-toggle"
+                style={[styles.secondaryButton, styles.headerMenuButton]}
+                onPress={() => setControlsExpanded((value) => !value)}
+              >
+                <Text style={styles.secondaryLabel}>{controlsLabel}</Text>
+              </Pressable>
+              <Text style={styles.headerStatusText}>
+                {humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · {store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={[styles.secondaryButton, styles.headerActionButton, !store.voiceAvailable ? styles.warningButton : null]}
+              onPress={handleTalkPress}
+            >
+              <Text style={[styles.secondaryLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>{talkLabel}</Text>
+            </Pressable>
+            <Text
+              style={[
+                styles.voiceStatusText,
+                store.voiceAvailable && store.realtimeConnected && store.hostStatus?.auth.status === "logged_in"
+                  ? styles.voiceStatusReady
+                  : styles.voiceStatusWarning
+              ]}
+            >
+              {voiceStatus}
+            </Text>
+            <Pressable
+              style={styles.disconnectButton}
+              onPress={() => {
+                store.disconnect().catch((error) => console.warn(error));
+              }}
+            >
+              <Text style={styles.disconnectLabel}>Disconnect</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {controlsExpanded ? (
+        <View style={styles.topPanel}>
+          <View style={styles.statusRow}>
+            <StatusChip label={store.hostStatus?.host.isOnline ? "Host online" : "Host offline"} tone={store.hostStatus?.host.isOnline ? "teal" : "orange"} />
+            <StatusChip label={humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} tone={store.hostStatus?.auth.status === "logged_in" ? "teal" : "orange"} />
+            <StatusChip label={store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"} tone={store.realtimeConnected ? "teal" : "orange"} />
+          </View>
+          <View style={styles.nav}>
+            {(["host", "sessions", "chat"] as const).map((view) => (
+              <Pressable
+                key={view}
+                style={[styles.navButton, store.view === view ? styles.navButtonActive : null]}
+                onPress={() => handleNavPress(view)}
+              >
+                <Text style={[styles.navLabel, store.view === view ? styles.navLabelActive : null]}>{labelForView(view)}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.topActions}>
+            <Pressable
+              style={[styles.secondaryButton, styles.topActionButton, store.refreshing ? styles.disabledButton : null]}
+              onPress={handleRefresh}
+              disabled={store.refreshing}
+            >
+              <Text style={styles.secondaryLabel}>{refreshLabel}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.disconnectButton}
+              onPress={() => {
+                store.disconnect().catch((error) => console.warn(error));
+              }}
+            >
+              <Text style={styles.disconnectLabel}>Disconnect</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {store.notice ? <Banner text={store.notice} tone="info" /> : null}
       {store.error ? <Banner text={store.error} tone="error" /> : null}
@@ -162,4 +259,23 @@ function humanizeCodexState(status: "logged_in" | "logged_out" | "error"): strin
     return "Codex needs attention";
   }
   return "Codex login required";
+}
+
+function humanizeVoiceStatus(store: AppState): string {
+  if (!store.voiceAvailable) {
+    return "Voice unavailable on this phone";
+  }
+  if (store.listening) {
+    return "Listening now";
+  }
+  if (!store.realtimeConnected) {
+    return "Desktop reconnecting";
+  }
+  if (!store.hostStatus?.host.isOnline) {
+    return "Desktop offline";
+  }
+  if (store.hostStatus?.auth.status !== "logged_in") {
+    return "Codex needs login";
+  }
+  return "Ready for voice";
 }

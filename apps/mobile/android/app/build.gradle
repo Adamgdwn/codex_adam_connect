@@ -2,6 +2,11 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+def hasGoogleServices = file("${projectDir}/google-services.json").exists()
+if (hasGoogleServices) {
+    apply plugin: "com.google.gms.google-services"
+}
+
 def osName = System.getProperty("os.name").toLowerCase(Locale.ROOT)
 def hermesBinaryRelativePath =
     osName.contains("mac")
@@ -111,7 +116,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
-        manifestPlaceholders = [usesCleartextTraffic: "true"]
+        manifestPlaceholders = [usesCleartextTraffic: "true", firebaseMessagingAutoInitEnabled: hasGoogleServices ? "true" : "false"]
     }
     signingConfigs {
         debug {

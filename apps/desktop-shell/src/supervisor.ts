@@ -27,7 +27,12 @@ export class DesktopShellSupervisor {
   private readonly events = new EventEmitter();
   private readonly repoRoot = path.resolve(__dirname, "../../..");
   private readonly localBaseUrl = process.env.DESKTOP_GATEWAY_URL?.trim() || `http://127.0.0.1:${process.env.GATEWAY_PORT ?? 43111}`;
+  private readonly gatewayDataDir =
+    process.env.GATEWAY_DATA_DIR?.trim() || path.join(this.repoRoot, "apps/gateway/.local-data/gateway");
+  private readonly desktopDataDir =
+    process.env.DESKTOP_DATA_DIR?.trim() || path.join(this.repoRoot, "apps/desktop-extension/.local-data/desktop");
   private readonly overviewUrl = `${this.localBaseUrl.replace(/\/+$/, "")}/api/desktop/overview`;
+  private readonly healthUrl = `${this.localBaseUrl.replace(/\/+$/, "")}/healthz`;
   private readonly managed: ManagedProcess[] = [];
   private latestOverview: DesktopOverviewResponse | null = null;
   private shuttingDown = false;
@@ -74,7 +79,7 @@ export class DesktopShellSupervisor {
       message: "Booting local services",
       detail: "Launching the gateway and desktop host."
     });
-    this.startManagedProcesses();
+    await this.startManagedProcesses();
     const ready = await this.waitForOverview();
     this.latestOverview = ready;
     this.emitOverview(ready);
@@ -127,13 +132,14 @@ export class DesktopShellSupervisor {
     await delay(300);
   }
 
-  private startManagedProcesses(): void {
+  private async startManagedProcesses(): Promise<void> {
     if (this.managed.length) {
       return;
     }
 
     this.ownsProcesses = true;
     this.managed.push(this.spawnManaged("gateway", ["run", "dev:gateway"]));
+    await this.waitForHealth();
     this.managed.push(this.spawnManaged("desktop", ["run", "dev:desktop"]));
   }
 
@@ -145,7 +151,9 @@ export class DesktopShellSupervisor {
         ...process.env,
         DESKTOP_APPROVED_ROOTS: process.env.DESKTOP_APPROVED_ROOTS?.trim() || this.repoRoot,
         DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Adam Connect Desktop",
-        DESKTOP_GATEWAY_URL: this.localBaseUrl
+        DESKTOP_GATEWAY_URL: this.localBaseUrl,
+        DESKTOP_DATA_DIR: this.desktopDataDir,
+        GATEWAY_DATA_DIR: this.gatewayDataDir
       },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -185,6 +193,23 @@ export class DesktopShellSupervisor {
     }
 
     throw new Error(`Adam Connect did not become ready within ${Math.round(timeoutMs / 1000)} seconds.`);
+  }
+
+  private async waitForHealth(timeoutMs = 20_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(this.healthUrl, { signal: AbortSignal.timeout(1_500) });
+        if (response.ok) {
+          return;
+        }
+      } catch {
+        // Keep polling until the gateway is accepting requests.
+      }
+      await delay(400);
+    }
+
+    throw new Error(`Adam Connect gateway did not become healthy within ${Math.round(timeoutMs / 1000)} seconds.`);
   }
 
   private async fetchOverview(timeoutMs: number): Promise<DesktopOverviewResponse | null> {

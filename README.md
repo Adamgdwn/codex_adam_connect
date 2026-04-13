@@ -6,15 +6,120 @@ Adam Connect turns a paired phone into a remote chat surface for the local Codex
 
 See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATUS.md) for the current checkpoint handoff.
 
+## Current Checkpoint
+
+This repository is the active home for the Adam Connect work:
+
+- repo path: `/home/adamgoodwin/code/agents/codex_adam_connect`
+- supported desktop entrypoint: `npm run launch`
+- supported desktop UI: the Electron shell
+- intended phone role: trusted remote operator console for Codex running on this desktop
+
+The Electron shell now includes the desktop dashboard inside the app and should expose:
+
+- `Operator`
+- `Phone Setup`
+- `Activity`
+- `Devices`
+- `Workspaces`
+- `Settings`
+
+The `Phone Setup` flow is meant to stay inside the app now, with:
+
+- a `Phone Setup` tab in the desktop shell
+- a compact QR card on the `Operator` tab
+- a larger QR in the `Phone Setup` tab
+- the browser reserved mainly for APK download and recovery links
+
+## Known Working Areas
+
+- desktop launcher installs and launches through the Linux desktop entry
+- the Electron shell is the primary GUI path
+- the gateway serves the updated desktop dashboard with the in-app QR code and `Phone Setup` tab
+- pairing codes remain stable across normal restarts
+- saved device repair flows exist for stale phone tokens
+- mobile sessions support operator chat plus project chat creation
+- response style controls and project wizard scaffolding are in place
+- realtime websocket auth uses short-lived tickets instead of long-lived device tokens
+
+## Known Issues
+
+- the Android phone can still show `Realtime connection dropped...` and may require reconnect or repair
+- the desktop shell has had startup race issues when the desktop host tries to start before the gateway is ready
+- stale Adam Connect background processes previously caused the shell to render older dashboard code after relaunch
+- local Codex availability can still fail if the desktop cannot spawn `codex`
+- transport is still tailnet-first `http/ws`, not a finished `https/wss` product-grade deployment
+
+## Most Recent Fixes
+
+- launcher cleanup now force-stops stale Adam Connect processes and clears port `43111` before relaunch
+- the shell supervisor now waits for gateway health before starting the desktop host
+- the desktop dashboard now includes an in-app `Phone Setup` tab and in-app QR surfaces
+- shell focus behavior was reduced so the app behaves more like a normal desktop window
+- state directories for the gateway and desktop host were made explicit so restarts keep a consistent identity
+
+## Next Steps
+
+### Immediate next session
+
+1. Open this repo in the correct folder: `/home/adamgoodwin/code/agents/codex_adam_connect`
+2. Launch Adam Connect from the desktop icon or `npm run launch`
+3. Confirm the shell shows the `Phone Setup` tab and the compact QR on `Operator`
+4. Pair or repair the phone against the current Tailscale URL and current pairing code
+5. Reproduce the mobile `Realtime connection dropped...` issue while watching live desktop logs
+
+### Highest-priority debugging
+
+1. Trace the realtime websocket path end to end:
+   mobile `createRealtimeTicket` -> gateway `/realtime/ticket` -> websocket `/ws` upgrade -> subscription broadcast
+2. Confirm whether the drop is caused by:
+   mobile network reachability,
+   failed websocket upgrade,
+   ticket expiry timing,
+   host/gateway restarts,
+   or missing host status broadcasts
+3. Add temporary logging around websocket ticket creation, upgrade success, socket close reason, and reconnect attempts
+4. Validate reconnect from a real phone after a fresh desktop launch, not against a stale background stack
+
+### Product follow-up after realtime is stable
+
+1. tighten voice interaction and transcript cleanup
+2. improve mobile/desktop recovery messaging
+3. finish shell-side device settings and device lifecycle controls
+4. complete Android notification validation with a real device
+5. harden packaging and release flow for Pop!_OS/Linux
+
+## Recommended Commands For The Next Window
+
+- preflight: `bash scripts/governance-preflight.sh`
+- launch shell: `npm run launch`
+- install Linux launcher: `npm run app:desktop:install-launcher`
+- mobile bundler: `npm run dev:mobile`
+- typecheck: `npm run typecheck`
+- build: `npm run build`
+- inspect launcher log: `tail -n 120 ~/.local/state/adam-connect/desktop-launch.log`
+- inspect gateway page: `curl -s http://127.0.0.1:43111/ | less`
+
+## Notes For Continuation
+
+- if the desktop shell appears to show old UI again, check whether a stale process is still holding port `43111`
+- if the phone pairs but realtime immediately drops, treat the websocket path as the primary bug, not the QR or pairing UI
+- if the shell says Codex is unavailable, verify the desktop can actually run `codex`
+- if a future Codex session opens in the wrong repository, switch back to `codex_adam_connect` before making changes
+
 ### Completed
 
 - paired phone chat flow is live through the gateway and desktop Codex bridge
-- the browser-based desktop dashboard is the current supported GUI
-- the dashboard now shows pairing code, Tailscale status, recent sessions, recent devices, QR onboarding, and Android APK download links
-- `npm run launch` starts the local services and opens the dashboard automatically
-- `npm run app:desktop:install-launcher` installs a Linux desktop-menu launcher that points at the supported browser dashboard flow
+- the Electron desktop shell is now the supported desktop entrypoint
+- the shell centers the `Operator` flow and exposes `Operator`, `Activity`, `Devices`, `Workspaces`, and `Settings`
+- `npm run launch` now prefers the native shell when a GUI session is available, while `npm run launch:no-open` remains the headless path
+- `npm run app:desktop:install-launcher` installs a Linux desktop-menu launcher for the native operator console
 - the phone keeps a default `Operator` chat path for quick remote turns
+- the phone now includes a project-start wizard that can kick off a project chat with goal, output shape, template, and reply style in one step
 - pairing codes stay stable across normal desktop restarts, and stale phone tokens can enter a repair flow instead of a full cold start
+- realtime websocket auth now uses short-lived tickets instead of passing long-lived device tokens directly
+- paired devices now track push readiness, notification preferences, revoke state, repair history, and audit events
+- response style preferences now flow from the phone through the gateway into desktop Codex turns
 
 ### Next
 
@@ -52,13 +157,14 @@ See [docs/STATUS.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/STATU
 - copy `.env.example` to `.env`
 - set `DESKTOP_APPROVED_ROOTS` to one or more absolute roots
 - optionally set `MOBILE_DEFAULT_BASE_URL` to prefill the desktop URL in local mobile builds
+- optional for Android background updates: add `apps/mobile/android/app/google-services.json` and set `FCM_SERVER_KEY`
 - launch the desktop app with `npm run launch`
-- the launcher opens `http://127.0.0.1:43111/` automatically as the desktop dashboard
+- the launcher opens the native shell when a GUI session is available
 - optional on Linux: install a menu launcher with `npm run app:desktop:install-launcher`
 - start the mobile bundler with `npm run dev:mobile`
 - run the mobile app from `apps/mobile`
 
-If you set `GATEWAY_ANDROID_APK_PATH` to a built APK, the desktop dashboard exposes a direct Android download plus a scannable QR code for the phone. The old lower-level startup path still exists as `npm run dev:desktop-stack` if you want raw terminal control.
+If you set `GATEWAY_ANDROID_APK_PATH` to a built APK, the desktop install/recovery surface exposes a direct Android download plus a scannable QR code for the phone. The old lower-level startup path still exists as `npm run dev:desktop-stack` if you want raw terminal control.
 
 The current product priority is to make the phone feel like a persistent remote operator console for Codex rather than a thin remote terminal.
 

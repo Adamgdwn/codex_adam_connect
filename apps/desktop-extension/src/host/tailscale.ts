@@ -18,6 +18,7 @@ interface TailscaleStatusJson {
 }
 
 export async function getTailscaleStatus(port: number): Promise<TailscaleStatus> {
+  const transportSecurity = process.env.DESKTOP_GATEWAY_URL?.startsWith("https://") ? "secure" : "insecure";
   try {
     const { stdout, stderr } = await execFileAsync("tailscale", ["status", "--json"]);
     const combined = `${stdout ?? ""}${stderr ?? ""}`.trim();
@@ -50,6 +51,7 @@ export async function getTailscaleStatus(port: number): Promise<TailscaleStatus>
       dnsName,
       ipv4,
       suggestedUrl: connected && suggestedHost ? `http://${suggestedHost}:${port}` : null,
+      transportSecurity,
       installUrl: INSTALL_URL,
       loginUrl: LOGIN_URL
     };
@@ -63,6 +65,7 @@ export async function getTailscaleStatus(port: number): Promise<TailscaleStatus>
       dnsName: null,
       ipv4: null,
       suggestedUrl: null,
+      transportSecurity,
       installUrl: INSTALL_URL,
       loginUrl: LOGIN_URL
     };

@@ -12,7 +12,11 @@ import {
   hostStartTurnRequestSchema,
   pairingCompleteRequestSchema,
   postMessageRequestSchema,
+  registerPushTokenRequestSchema,
   registerHostRequestSchema,
+  renameDeviceRequestSchema,
+  sendTestNotificationRequestSchema,
+  updateNotificationPrefsRequestSchema,
   updateSessionRequestSchema
 } from "@adam-connect/shared";
 import { WebSocketServer } from "ws";
@@ -160,6 +164,11 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (method === "POST" && url.pathname === "/realtime/ticket") {
+      sendJson(res, 200, await store.createRealtimeTicket(readBearer(req)));
+      return;
+    }
+
     if (method === "POST" && url.pathname === "/host/heartbeat") {
       const parsed = hostHeartbeatRequestSchema.parse(await readJson(req));
       sendJson(res, 200, await store.heartbeat(readBearer(req), parsed));
@@ -203,6 +212,45 @@ const server = createServer(async (req, res) => {
 
     if (method === "GET" && url.pathname === "/sessions") {
       sendJson(res, 200, await store.listSessions(readBearer(req)));
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/devices") {
+      sendJson(res, 200, await store.listDevices(readBearer(req)));
+      return;
+    }
+
+    if (method === "PATCH" && /^\/devices\/[^/]+$/.test(url.pathname)) {
+      const deviceId = url.pathname.split("/")[2];
+      const parsed = renameDeviceRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.renameDevice(readBearer(req), deviceId, parsed));
+      return;
+    }
+
+    if (method === "POST" && /^\/devices\/[^/]+\/revoke$/.test(url.pathname)) {
+      const deviceId = url.pathname.split("/")[2];
+      sendJson(res, 200, await store.revokeDevice(readBearer(req), deviceId));
+      return;
+    }
+
+    if (method === "POST" && /^\/devices\/[^/]+\/push-token$/.test(url.pathname)) {
+      const deviceId = url.pathname.split("/")[2];
+      const parsed = registerPushTokenRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.registerPushToken(readBearer(req), deviceId, parsed));
+      return;
+    }
+
+    if (method === "POST" && /^\/devices\/[^/]+\/notification-prefs$/.test(url.pathname)) {
+      const deviceId = url.pathname.split("/")[2];
+      const parsed = updateNotificationPrefsRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.updateNotificationPrefs(readBearer(req), deviceId, parsed));
+      return;
+    }
+
+    if (method === "POST" && /^\/devices\/[^/]+\/test-notification$/.test(url.pathname)) {
+      const deviceId = url.pathname.split("/")[2];
+      const parsed = sendTestNotificationRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.sendTestNotification(readBearer(req), deviceId, parsed.event));
       return;
     }
 
@@ -260,14 +308,14 @@ server.on("upgrade", (req, socket, head) => {
     return;
   }
 
-  const token = url.searchParams.get("token");
-  if (!token) {
+  const ticket = url.searchParams.get("ticket");
+  if (!ticket) {
     socket.destroy();
     return;
   }
 
   void store
-    .getTokenHostId(token)
+    .consumeRealtimeTicket(ticket)
     .then((hostId) => {
       wss.handleUpgrade(req, socket, head, (ws) => {
         addSubscription(hostId, ws);

@@ -3,11 +3,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createId, generatePairingCode, nowIso } from "@adam-connect/core";
 import type {
+  AuditEvent,
   ChatMessage,
   ChatSession,
   CreateSessionRequest,
   GatewayOverview,
   HostAssistantDeltaRequest,
+  HostAvailability,
   HostAuthState,
   HostCompleteTurnRequest,
   HostFailTurnRequest,
@@ -16,15 +18,23 @@ import type {
   HostStartTurnRequest,
   HostStatus,
   HostWorkItem,
+  NotificationEvent,
+  NotificationPrefs,
   PairingCompleteResponse,
   PairedDevice,
   PostMessageRequest,
   RecentSessionActivity,
   RegisterHostRequest,
   RegisterHostResponse,
+  RegisterPushTokenRequest,
+  RealtimeTicketResponse,
+  RenameDeviceRequest,
+  RepairState,
   RegisteredHost,
+  RunState,
   StreamEvent,
   TailscaleStatus,
+  UpdateNotificationPrefsRequest,
   UpdateSessionRequest
 } from "@adam-connect/shared";
 
@@ -48,6 +58,7 @@ interface GatewayState {
   devices: DeviceRecord[];
   sessions: SessionRecord[];
   messages: ChatMessage[];
+  auditEvents: AuditEvent[];
 }
 
 type Principal =
@@ -57,6 +68,11 @@ type Principal =
 interface BroadcastEnvelope {
   hostId: string;
   event: StreamEvent;
+}
+
+interface RealtimeTicketRecord {
+  hostId: string;
+  expiresAt: string;
 }
 
 const defaultAuthState: HostAuthState = {
@@ -71,21 +87,33 @@ const defaultTailscaleStatus: TailscaleStatus = {
   dnsName: null,
   ipv4: null,
   suggestedUrl: null,
+  transportSecurity: "insecure",
   installUrl: "https://tailscale.com/download",
   loginUrl: "https://login.tailscale.com/start"
 };
+
+const defaultNotificationPrefs: NotificationPrefs = {
+  run_complete: true,
+  run_failed: true,
+  repair_needed: true,
+  approval_needed: true
+};
+
+const INTERRUPT_RECLAIM_MS = 5_000;
 
 const defaultState = (): GatewayState => ({
   hosts: [],
   devices: [],
   sessions: [],
-  messages: []
+  messages: [],
+  auditEvents: []
 });
 
 export class GatewayStore {
   private readonly dataFile: string;
   private readonly events = new EventEmitter();
   private state: GatewayState | null = null;
+  private readonly realtimeTickets = new Map<string, RealtimeTicketRecord>();
 
   constructor(private readonly dataDir: string) {
     this.dataFile = path.join(dataDir, "state.json");
@@ -130,6 +158,13 @@ export class GatewayStore {
       host.hostToken = createId("hosttoken");
     }
 
+    this.addAuditEvent(state, {
+      hostId: host.id,
+      deviceId: null,
+      sessionId: null,
+      type: "host_registered",
+      detail: host.hostName
+    });
     await this.writeState(state);
     this.emitHostStatus(host);
 
@@ -156,15 +191,38 @@ export class GatewayStore {
         id: createId("device"),
         hostId: host.id,
         deviceName,
+        pushToken: null,
+        notificationPrefs: defaultNotificationPrefs,
+        revokedAt: null,
+        lastNotificationAt: null,
+        repairCount: 0,
+        repairedAt: null,
         createdAt: now,
         lastSeenAt: now,
         deviceToken: createId("devicetoken")
       };
       state.devices.push(device);
       this.recoverSiblingSessions(state, host, device);
+      this.addAuditEvent(state, {
+        hostId: host.id,
+        deviceId: device.id,
+        sessionId: null,
+        type: "device_paired",
+        detail: device.deviceName
+      });
     } else {
       device.lastSeenAt = now;
       device.deviceToken = createId("devicetoken");
+      device.revokedAt = null;
+      device.repairCount += 1;
+      device.repairedAt = now;
+      this.addAuditEvent(state, {
+        hostId: host.id,
+        deviceId: device.id,
+        sessionId: null,
+        type: "device_repaired",
+        detail: device.deviceName
+      });
     }
 
     await this.writeState(state);
@@ -191,6 +249,29 @@ export class GatewayStore {
     return principal.host.id;
   }
 
+  async createRealtimeTicket(token: string): Promise<RealtimeTicketResponse> {
+    const principal = await this.requirePrincipal(token);
+    const ticket = createId("realtime");
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    this.realtimeTickets.set(ticket, {
+      hostId: principal.host.id,
+      expiresAt
+    });
+    return { ticket, expiresAt };
+  }
+
+  async consumeRealtimeTicket(ticket: string): Promise<string> {
+    const record = this.realtimeTickets.get(ticket);
+    if (!record) {
+      throw new Error("Realtime ticket not found.");
+    }
+    this.realtimeTickets.delete(ticket);
+    if (Date.now() >= new Date(record.expiresAt).getTime()) {
+      throw new Error("Realtime ticket expired.");
+    }
+    return record.hostId;
+  }
+
   async heartbeat(token: string, input: HostHeartbeatRequest): Promise<HostStatus> {
     const principal = await this.requireHost(token);
     principal.host.lastSeenAt = nowIso();
@@ -202,11 +283,123 @@ export class GatewayStore {
     return this.buildHostStatus(principal.host.id);
   }
 
+  async listDevices(token: string): Promise<PairedDevice[]> {
+    const principal = await this.requireDevice(token);
+    await this.touchDevice(principal.device);
+    return (await this.readState()).devices
+      .filter((item) => item.hostId === principal.host.id && !item.revokedAt)
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
+      .map(toPublicDevice);
+  }
+
+  async renameDevice(token: string, deviceId: string, input: RenameDeviceRequest): Promise<PairedDevice> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const device = state.devices.find((item) => item.id === deviceId && item.hostId === principal.host.id && !item.revokedAt);
+    if (!device) {
+      throw new Error("Device not found.");
+    }
+    device.deviceName = input.deviceName.trim();
+    device.lastSeenAt = nowIso();
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: device.id,
+      sessionId: null,
+      type: "device_renamed",
+      detail: device.deviceName
+    });
+    await this.writeState(state);
+    this.emitHostStatus(principal.host);
+    return toPublicDevice(device);
+  }
+
+  async revokeDevice(token: string, deviceId: string): Promise<PairedDevice> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const device = state.devices.find((item) => item.id === deviceId && item.hostId === principal.host.id && !item.revokedAt);
+    if (!device) {
+      throw new Error("Device not found.");
+    }
+    device.revokedAt = nowIso();
+    device.deviceToken = createId("revoked");
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: device.id,
+      sessionId: null,
+      type: "device_revoked",
+      detail: device.deviceName
+    });
+    await this.writeState(state);
+    this.emitHostStatus(principal.host);
+    return toPublicDevice(device);
+  }
+
+  async registerPushToken(token: string, deviceId: string, input: RegisterPushTokenRequest): Promise<PairedDevice> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const device = state.devices.find((item) => item.id === deviceId && item.hostId === principal.host.id && !item.revokedAt);
+    if (!device) {
+      throw new Error("Device not found.");
+    }
+    device.pushToken = input.pushToken.trim();
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: device.id,
+      sessionId: null,
+      type: "push_token_registered",
+      detail: device.deviceName
+    });
+    await this.writeState(state);
+    return toPublicDevice(device);
+  }
+
+  async updateNotificationPrefs(
+    token: string,
+    deviceId: string,
+    input: UpdateNotificationPrefsRequest
+  ): Promise<PairedDevice> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const device = state.devices.find((item) => item.id === deviceId && item.hostId === principal.host.id && !item.revokedAt);
+    if (!device) {
+      throw new Error("Device not found.");
+    }
+    device.notificationPrefs = input;
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: device.id,
+      sessionId: null,
+      type: "notification_prefs_updated",
+      detail: device.deviceName
+    });
+    await this.writeState(state);
+    return toPublicDevice(device);
+  }
+
+  async sendTestNotification(token: string, deviceId: string, event: NotificationEvent): Promise<{ ok: true; deviceId: string }> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const device = state.devices.find((item) => item.id === deviceId && item.hostId === principal.host.id && !item.revokedAt);
+    if (!device) {
+      throw new Error("Device not found.");
+    }
+    await this.sendNotification(state, principal.host.id, device, event, "Adam Connect test notification");
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: device.id,
+      sessionId: null,
+      type: "notification_test_sent",
+      detail: event
+    });
+    await this.writeState(state);
+    return { ok: true, deviceId };
+  }
+
   async listSessions(token: string): Promise<ChatSession[]> {
     const principal = await this.requireDevice(token);
     await this.touchDevice(principal.device);
     return (await this.readState()).sessions
-      .filter((item) => item.deviceId === principal.device.id)
+      .filter((item) => item.deviceId === principal.device.id && !item.archived)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .map(toPublicSession);
   }
@@ -227,12 +420,17 @@ export class GatewayStore {
       hostId: principal.host.id,
       deviceId: principal.device.id,
       title: input.title?.trim() || `Chat ${existingCount + 1}`,
+      kind: input.kind ?? "project",
+      pinned: input.kind === "operator",
+      archived: false,
       rootPath,
       threadId: null,
       status: "idle",
       activeTurnId: null,
       stopRequested: false,
       lastError: null,
+      lastPreview: input.starterPrompt?.trim() || null,
+      lastActivityAt: now,
       createdAt: now,
       updatedAt: now,
       claimedMessageId: null,
@@ -240,6 +438,13 @@ export class GatewayStore {
     };
 
     state.sessions.push(session);
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: session.id,
+      type: "session_created",
+      detail: `${session.kind}:${session.title}`
+    });
     await this.writeState(state);
     this.emitSession(session);
     return toPublicSession(session);
@@ -257,6 +462,13 @@ export class GatewayStore {
     targetSession.title = input.title.trim();
     targetSession.updatedAt = nowIso();
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: targetSession.id,
+      type: "session_renamed",
+      detail: targetSession.title
+    });
     await this.writeState(state);
     this.emitSession(targetSession);
     return toPublicSession(targetSession);
@@ -270,6 +482,13 @@ export class GatewayStore {
     state.sessions = state.sessions.filter((item) => item.id !== session.id);
     state.messages = state.messages.filter((item) => item.sessionId !== session.id);
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: session.id,
+      type: "session_deleted",
+      detail: session.title
+    });
     await this.writeState(state);
     return { ok: true, deletedSessionId: session.id };
   }
@@ -299,6 +518,9 @@ export class GatewayStore {
       content: input.text.trim(),
       status: "pending",
       errorMessage: null,
+      inputMode: input.inputMode ?? "text",
+      responseStyle: input.responseStyle ?? "natural",
+      transcriptPolished: input.transcriptPolished ?? false,
       createdAt: now,
       updatedAt: now
     };
@@ -311,7 +533,16 @@ export class GatewayStore {
     targetSession.status = "queued";
     targetSession.updatedAt = now;
     targetSession.lastError = null;
+    targetSession.lastPreview = truncatePreview(input.text.trim());
+    targetSession.lastActivityAt = now;
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: targetSession.id,
+      type: "message_posted",
+      detail: `${input.inputMode ?? "text"}:${input.responseStyle ?? "natural"}`
+    });
     await this.writeState(state);
     this.emitMessage(principal.host.id, message);
     this.emitSession(targetSession);
@@ -330,6 +561,7 @@ export class GatewayStore {
     if (targetSession.activeTurnId) {
       targetSession.stopRequested = true;
       targetSession.status = "stopping";
+      targetSession.stopClaimedAt = null;
       targetSession.updatedAt = nowIso();
     } else {
       const pending = [...state.messages]
@@ -345,6 +577,13 @@ export class GatewayStore {
       targetSession.updatedAt = nowIso();
     }
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: targetSession.id,
+      type: "stop_requested",
+      detail: targetSession.title
+    });
     await this.writeState(state);
     this.emitSession(targetSession);
     return toPublicSession(targetSession);
@@ -355,7 +594,11 @@ export class GatewayStore {
     const state = await this.readState();
 
     const interruptSession = state.sessions.find(
-      (item) => item.hostId === principal.host.id && item.activeTurnId && item.stopRequested && !item.stopClaimedAt
+      (item) =>
+        item.hostId === principal.host.id &&
+        item.activeTurnId &&
+        item.stopRequested &&
+        (!item.stopClaimedAt || isInterruptClaimStale(item.stopClaimedAt))
     );
     if (interruptSession) {
       interruptSession.stopClaimedAt = nowIso();
@@ -411,6 +654,9 @@ export class GatewayStore {
       content: "",
       status: "streaming",
       errorMessage: null,
+      inputMode: null,
+      responseStyle: null,
+      transcriptPolished: null,
       createdAt: nowIso(),
       updatedAt: nowIso()
     };
@@ -423,8 +669,16 @@ export class GatewayStore {
     session.claimedMessageId = null;
     session.lastError = null;
     session.updatedAt = nowIso();
+    session.lastActivityAt = session.updatedAt;
     state.messages.push(assistantMessage);
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+      type: "run_started",
+      detail: input.turnId
+    });
     await this.writeState(state);
     this.emitMessage(principal.host.id, userMessage);
     this.emitMessage(principal.host.id, assistantMessage);
@@ -440,6 +694,8 @@ export class GatewayStore {
 
     assistantMessage.content += input.delta;
     assistantMessage.updatedAt = nowIso();
+    session.lastPreview = truncatePreview(assistantMessage.content);
+    session.lastActivityAt = assistantMessage.updatedAt;
 
     await this.writeState(state);
     this.emitMessage(principal.host.id, assistantMessage);
@@ -462,7 +718,17 @@ export class GatewayStore {
     session.stopRequested = false;
     session.stopClaimedAt = null;
     session.updatedAt = nowIso();
+    session.lastPreview = truncatePreview(assistantMessage.content);
+    session.lastActivityAt = session.updatedAt;
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+      type: "run_completed",
+      detail: input.turnId
+    });
+    await this.sendSessionNotification(state, principal.host.id, session.id, "run_complete", truncatePreview(assistantMessage.content));
     await this.writeState(state);
     this.emitMessage(principal.host.id, assistantMessage);
     this.emitSession(session);
@@ -495,6 +761,9 @@ export class GatewayStore {
         content: "",
         status: "failed",
         errorMessage: input.errorMessage,
+        inputMode: null,
+        responseStyle: null,
+        transcriptPolished: null,
         createdAt: nowIso(),
         updatedAt: nowIso()
       };
@@ -509,7 +778,17 @@ export class GatewayStore {
     session.stopClaimedAt = null;
     session.lastError = input.errorMessage;
     session.updatedAt = nowIso();
+    session.lastPreview = truncatePreview(input.errorMessage);
+    session.lastActivityAt = session.updatedAt;
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+      type: "run_failed",
+      detail: input.errorMessage
+    });
+    await this.sendSessionNotification(state, principal.host.id, session.id, "run_failed", input.errorMessage);
     await this.writeState(state);
     this.emitMessage(principal.host.id, userMessage);
     this.emitMessage(principal.host.id, assistantMessage);
@@ -522,8 +801,14 @@ export class GatewayStore {
     const state = await this.readState();
     const session = this.requireSessionForHostState(state, input.sessionId, principal.host.id);
 
-    if (input.assistantMessageId) {
-      const assistantMessage = this.requireMessage(state, input.assistantMessageId, session.id);
+    const assistantMessageId =
+      input.assistantMessageId ??
+      [...state.messages]
+        .reverse()
+        .find((message) => message.sessionId === session.id && message.role === "assistant" && message.status === "streaming")?.id;
+
+    if (assistantMessageId) {
+      const assistantMessage = this.requireMessage(state, assistantMessageId, session.id);
       assistantMessage.status = "interrupted";
       assistantMessage.updatedAt = nowIso();
       assistantMessage.errorMessage = "Run stopped from the mobile app.";
@@ -535,7 +820,15 @@ export class GatewayStore {
     session.stopRequested = false;
     session.stopClaimedAt = null;
     session.updatedAt = nowIso();
+    session.lastActivityAt = session.updatedAt;
 
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: session.deviceId,
+      sessionId: session.id,
+      type: "run_interrupted",
+      detail: input.turnId
+    });
     await this.writeState(state);
     this.emitSession(session);
     return toPublicSession(session);
@@ -550,14 +843,15 @@ export class GatewayStore {
         lastSeenDevice: null,
         recentDevices: [],
         recentSessions: [],
-        recentSessionActivity: []
+        recentSessionActivity: [],
+        auditEvents: []
       };
     }
 
     const recentDevices = [...state.devices]
-      .filter((item) => item.hostId === host.id)
+      .filter((item) => item.hostId === host.id && !item.revokedAt)
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))
-      .slice(0, 4);
+      .slice(0, 8);
 
     const recentSessionRecords = [...state.sessions]
       .filter((item) => item.hostId === host.id)
@@ -584,7 +878,11 @@ export class GatewayStore {
       lastSeenDevice: recentDevices[0] ? toPublicDevice(recentDevices[0]) : null,
       recentDevices: recentDevices.map(toPublicDevice),
       recentSessions,
-      recentSessionActivity
+      recentSessionActivity,
+      auditEvents: state.auditEvents
+        .filter((item) => item.hostId === host.id)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .slice(0, 12)
     };
   }
 
@@ -597,6 +895,9 @@ export class GatewayStore {
 
     const device = state.devices.find((item) => item.deviceToken === token);
     if (!device) {
+      throw new Error("Invalid session token.");
+    }
+    if (device.revokedAt) {
       throw new Error("Invalid session token.");
     }
     const pairedHost = state.hosts.find((item) => item.id === device.hostId);
@@ -661,8 +962,11 @@ export class GatewayStore {
       host: toPublicHost(host),
       auth: host.auth,
       tailscale: host.tailscale,
+      availability: deriveHostAvailability(host),
+      repairState: deriveRepairState(host),
+      runState: deriveRunState(state.sessions, hostId),
       activeSessionCount: state.sessions.filter((item) => item.hostId === hostId && item.activeTurnId).length,
-      pairedDeviceCount: state.devices.filter((item) => item.hostId === hostId).length
+      pairedDeviceCount: state.devices.filter((item) => item.hostId === hostId && !item.revokedAt).length
     };
   }
 
@@ -704,6 +1008,109 @@ export class GatewayStore {
     await this.writeState(await this.readState());
   }
 
+  private addAuditEvent(
+    state: GatewayState,
+    input: { hostId: string; deviceId: string | null; sessionId: string | null; type: string; detail: string | null }
+  ): void {
+    state.auditEvents.unshift({
+      id: createId("audit"),
+      hostId: input.hostId,
+      deviceId: input.deviceId,
+      sessionId: input.sessionId,
+      type: input.type,
+      detail: input.detail,
+      createdAt: nowIso()
+    });
+    state.auditEvents = state.auditEvents.slice(0, 250);
+  }
+
+  private async sendSessionNotification(
+    state: GatewayState,
+    hostId: string,
+    sessionId: string,
+    event: NotificationEvent,
+    detail: string
+  ): Promise<void> {
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      return;
+    }
+    const device = state.devices.find((item) => item.id === session.deviceId && !item.revokedAt);
+    if (!device) {
+      return;
+    }
+    await this.sendNotification(state, hostId, device, event, detail, sessionId);
+  }
+
+  private async sendNotification(
+    state: GatewayState,
+    hostId: string,
+    device: DeviceRecord,
+    event: NotificationEvent,
+    detail: string,
+    sessionId: string | null = null
+  ): Promise<void> {
+    if (!device.pushToken || !device.notificationPrefs[event]) {
+      return;
+    }
+    const serverKey = process.env.FCM_SERVER_KEY?.trim();
+    if (!serverKey) {
+      this.addAuditEvent(state, {
+        hostId,
+        deviceId: device.id,
+        sessionId,
+        type: "notification_skipped",
+        detail: `${event}:missing_fcm_server_key`
+      });
+      return;
+    }
+
+    const payload = {
+      to: device.pushToken,
+      priority: "high",
+      notification: {
+        title: notificationTitleForEvent(event),
+        body: detail
+      },
+      data: {
+        event,
+        hostId,
+        sessionId: sessionId ?? "",
+        detail
+      }
+    };
+
+    try {
+      const response = await fetch("https://fcm.googleapis.com/fcm/send", {
+        method: "POST",
+        headers: {
+          authorization: `key=${serverKey}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error(`FCM responded with ${response.status}`);
+      }
+      device.lastNotificationAt = nowIso();
+      this.addAuditEvent(state, {
+        hostId,
+        deviceId: device.id,
+        sessionId,
+        type: "notification_sent",
+        detail: event
+      });
+    } catch (error) {
+      this.addAuditEvent(state, {
+        hostId,
+        deviceId: device.id,
+        sessionId,
+        type: "notification_failed",
+        detail: error instanceof Error ? `${event}:${error.message}` : `${event}:unknown_error`
+      });
+    }
+  }
+
   private async readState(): Promise<GatewayState> {
     if (this.state) {
       return this.state;
@@ -712,7 +1119,7 @@ export class GatewayStore {
     await mkdir(this.dataDir, { recursive: true });
     try {
       const raw = await readFile(this.dataFile, "utf8");
-      this.state = JSON.parse(raw) as GatewayState;
+      this.state = migrateState(JSON.parse(raw) as Partial<GatewayState>);
     } catch {
       this.state = defaultState();
       await this.writeState(this.state);
@@ -779,6 +1186,12 @@ function toPublicDevice(device: DeviceRecord): PairedDevice {
     id: device.id,
     hostId: device.hostId,
     deviceName: device.deviceName,
+    pushToken: device.pushToken,
+    notificationPrefs: device.notificationPrefs,
+    revokedAt: device.revokedAt,
+    lastNotificationAt: device.lastNotificationAt,
+    repairCount: device.repairCount,
+    repairedAt: device.repairedAt,
     createdAt: device.createdAt,
     lastSeenAt: device.lastSeenAt
   };
@@ -790,12 +1203,17 @@ function toPublicSession(session: SessionRecord): ChatSession {
     hostId: session.hostId,
     deviceId: session.deviceId,
     title: session.title,
+    kind: session.kind,
+    pinned: session.pinned,
+    archived: session.archived,
     rootPath: session.rootPath,
     threadId: session.threadId,
     status: session.status,
     activeTurnId: session.activeTurnId,
     stopRequested: session.stopRequested,
     lastError: session.lastError,
+    lastPreview: session.lastPreview,
+    lastActivityAt: session.lastActivityAt,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt
   };
@@ -826,4 +1244,119 @@ function sameRoots(left: string[], right: string[]): boolean {
   const leftSorted = [...left].sort();
   const rightSorted = [...right].sort();
   return leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
+function truncatePreview(value: string, maxLength = 140): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function notificationTitleForEvent(event: NotificationEvent): string {
+  switch (event) {
+    case "approval_needed":
+      return "Adam Connect approval needed";
+    case "repair_needed":
+      return "Adam Connect repair needed";
+    case "run_failed":
+      return "Adam Connect run failed";
+    default:
+      return "Adam Connect run complete";
+  }
+}
+
+function deriveHostAvailability(host: HostRecord): HostAvailability {
+  if (!isRecent(host.lastSeenAt, 15_000)) {
+    return "offline";
+  }
+  if (host.auth.status !== "logged_in") {
+    return "codex_unavailable";
+  }
+  if (!host.tailscale.connected) {
+    return "tailscale_unavailable";
+  }
+  if (host.tailscale.transportSecurity === "insecure") {
+    return "needs_attention";
+  }
+  return "ready";
+}
+
+function deriveRepairState(host: HostRecord): RepairState {
+  return isRecent(host.lastSeenAt, 15_000) ? "healthy" : "reconnecting";
+}
+
+function deriveRunState(sessions: SessionRecord[], hostId: string): RunState {
+  if (sessions.some((item) => item.hostId === hostId && item.status === "stopping")) {
+    return "stopping";
+  }
+  if (sessions.some((item) => item.hostId === hostId && item.status === "running")) {
+    return "running";
+  }
+  if (sessions.some((item) => item.hostId === hostId && item.status === "queued")) {
+    return "sending";
+  }
+  if (sessions.some((item) => item.hostId === hostId && item.status === "error")) {
+    return "failed";
+  }
+  return "ready";
+}
+
+function isInterruptClaimStale(value: string): boolean {
+  return Date.now() - new Date(value).getTime() >= INTERRUPT_RECLAIM_MS;
+}
+
+function migrateState(input: Partial<GatewayState>): GatewayState {
+  const state = defaultState();
+  const now = nowIso();
+  return {
+    hosts: (input.hosts ?? []).map((host) => {
+      const record = host as Partial<HostRecord>;
+      return {
+        ...record,
+        auth: record.auth ?? defaultAuthState,
+        tailscale: {
+          ...defaultTailscaleStatus,
+          ...(record.tailscale ?? {})
+        }
+      } as HostRecord;
+    }),
+    devices: (input.devices ?? []).map((device) => {
+      const record = device as Partial<DeviceRecord>;
+      return {
+        ...record,
+        pushToken: record.pushToken ?? null,
+        notificationPrefs: record.notificationPrefs ?? defaultNotificationPrefs,
+        revokedAt: record.revokedAt ?? null,
+        lastNotificationAt: record.lastNotificationAt ?? null,
+        repairCount: record.repairCount ?? 0,
+        repairedAt: record.repairedAt ?? null
+      } as DeviceRecord;
+    }),
+    sessions: (input.sessions ?? []).map((session) => {
+      const record = session as Partial<SessionRecord>;
+      const isOperator = record.title?.trim().toLowerCase() === "operator";
+      return {
+        ...record,
+        kind: record.kind ?? (isOperator ? "operator" : "project"),
+        pinned: record.pinned ?? isOperator,
+        archived: record.archived ?? false,
+        lastPreview: record.lastPreview ?? null,
+        lastActivityAt: record.lastActivityAt ?? record.updatedAt ?? now,
+        claimedMessageId: record.claimedMessageId ?? null,
+        stopClaimedAt: record.stopClaimedAt ?? null
+      } as SessionRecord;
+    }),
+    messages: (input.messages ?? []).map((message) => {
+      const record = message as Partial<ChatMessage>;
+      return {
+        ...record,
+        inputMode: record.inputMode ?? null,
+        responseStyle: record.responseStyle ?? null,
+        transcriptPolished: record.transcriptPolished ?? null
+      } as ChatMessage;
+    }),
+    auditEvents: input.auditEvents ?? []
+  };
 }

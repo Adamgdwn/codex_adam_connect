@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatMessageStatus, ChatSession } from "@adam-connect/shared";
+import type { ChatMessage, ChatMessageStatus, ChatSession, InputMode } from "@adam-connect/shared";
 
 export const OPERATOR_SESSION_TITLE = "Operator";
 
@@ -43,8 +43,31 @@ export function pickPreferredSessionId(currentSelected: string | null, sessions:
   return operatorSession?.id ?? sessions[0]?.id ?? null;
 }
 
+export function findSendTargetSession(selectedSessionId: string | null, sessions: ChatSession[]): ChatSession | null {
+  const sessionId = pickPreferredSessionId(selectedSessionId, sessions);
+  return sessions.find((session) => session.id === sessionId) ?? null;
+}
+
+export function findStopTargetSession(selectedSessionId: string | null, sessions: ChatSession[]): ChatSession | null {
+  const selectedSession = selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null;
+  if (isSessionBusy(selectedSession)) {
+    return selectedSession;
+  }
+
+  const sendTargetSession = findSendTargetSession(selectedSessionId, sessions);
+  if (isSessionBusy(sendTargetSession)) {
+    return sendTargetSession;
+  }
+
+  return sessions.find((session) => isSessionBusy(session)) ?? null;
+}
+
 export function isSessionBusy(session: ChatSession | null | undefined): boolean {
   return Boolean(session && (session.status === "queued" || session.status === "running" || session.status === "stopping"));
+}
+
+export function isQueuedVoiceAutoSendPending(autoSendVoice: boolean, composer: string, composerInputMode: InputMode): boolean {
+  return autoSendVoice && composer.trim().length > 0 && composerInputMode === "voice";
 }
 
 export function requiresVoiceReview(transcript: string): boolean {

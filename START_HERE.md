@@ -9,12 +9,13 @@ For the current checkpoint handoff, see [docs/STATUS.md](/home/adamgoodwin/code/
 
 ### What Just Completed
 
-- the browser dashboard at `http://127.0.0.1:43111/` is now the supported desktop GUI
-- `npm run launch` starts the gateway plus desktop host and opens that GUI automatically
-- the dashboard includes pairing, Tailscale guidance, recent sessions, recent devices, QR onboarding, and Android APK download support
+- the Electron shell is now the supported desktop GUI
+- `npm run launch` starts the gateway plus desktop host and opens the native shell automatically when a GUI session is available
+- the shell-facing desktop surface now centers `Operator`, `Activity`, `Devices`, `Workspaces`, and `Settings`
 - a Linux desktop launcher installer is available via `npm run app:desktop:install-launcher`
 - the phone now keeps a default `Operator` chat path for quick remote turns
 - pairing codes stay stable across normal desktop restarts and the phone can enter a repair flow if its saved token goes stale
+- realtime websocket auth now uses short-lived tickets instead of passing the saved device token directly
 
 ### What Is Next
 
@@ -59,6 +60,13 @@ Fill `.env`:
 - optional: `GATEWAY_ANDROID_APK_PATH`
 - optional: `DESKTOP_GATEWAY_URL`
 - optional: `CODEX_APP_SERVER_URL`
+- optional for Android background updates: `FCM_SERVER_KEY`
+
+For Android background updates, also add Firebase's `google-services.json` to:
+
+```bash
+apps/mobile/android/app/google-services.json
+```
 
 ## 3) Validate The Repo
 
@@ -80,7 +88,7 @@ The launcher:
 
 - starts the gateway and desktop host together
 - fills in a sane default approved root if you have not configured one yet
-- opens the desktop dashboard in your browser automatically
+- opens the native shell automatically when a GUI session is available
 
 The desktop host still prints:
 
@@ -102,12 +110,12 @@ If you want Adam Connect to appear in the Linux app menu, also run:
 npm run app:desktop:install-launcher
 ```
 
-The desktop dashboard at `http://127.0.0.1:43111/` now shows:
+The desktop control surface now shows:
 
 - the live pairing code
-- host and Tailscale health
-- recent chats and paired devices
-- a QR code for the phone install/onboarding page
+- operator readiness, recovery state, and run state
+- recent chats, audit events, and paired devices
+- a QR code plus install/recovery entrypoint for the phone
 - an Android APK download button if `GATEWAY_ANDROID_APK_PATH` points to a built package
 
 ## 5) Start The Mobile App

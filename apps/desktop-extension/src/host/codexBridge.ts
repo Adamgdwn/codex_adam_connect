@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { HostAuthState } from "@adam-connect/shared";
+import { buildThreadInstructions } from "@adam-connect/shared";
+import type { HostAuthState, SessionKind } from "@adam-connect/shared";
 import { CodexAppServerClient } from "./codexAppServerClient.js";
+import { resolveCodexBinary } from "./codexBinary.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,6 +22,8 @@ interface TurnStartResponse {
 interface RunTurnInput {
   cwd: string;
   threadId: string | null;
+  sessionTitle: string;
+  sessionKind: SessionKind;
   text: string;
   onTurnStarted(input: { threadId: string; turnId: string }): Promise<void>;
   onDelta(delta: string): Promise<void>;
@@ -32,11 +36,13 @@ interface RunTurnResult {
 
 export class CodexBridge {
   private readonly client: CodexAppServerClient;
+  private readonly codexBin: string;
 
   constructor(
-    codexBin = process.env.CODEX_BIN ?? "codex",
+    codexBin = resolveCodexBinary(),
     listenUrl = process.env.CODEX_APP_SERVER_URL ?? "ws://127.0.0.1:43213"
   ) {
+    this.codexBin = codexBin;
     this.client = new CodexAppServerClient(codexBin, listenUrl);
   }
 
@@ -50,7 +56,7 @@ export class CodexBridge {
 
   async getAuthState(): Promise<HostAuthState> {
     try {
-      const { stdout, stderr } = await execFileAsync(process.env.CODEX_BIN ?? "codex", ["login", "status"]);
+      const { stdout, stderr } = await execFileAsync(this.codexBin, ["login", "status"]);
       const normalized = `${stdout ?? ""}${stderr ?? ""}`.trim();
       if (/logged in/i.test(normalized)) {
         return {
@@ -64,35 +70,54 @@ export class CodexBridge {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to read Codex login status.";
+      const detail =
+        /ENOENT/i.test(message) && !process.env.CODEX_BIN?.trim()
+          ? `${message}. Adam Connect could not find the Codex CLI automatically. Set CODEX_BIN to the full desktop codex path.`
+          : message;
       return {
         status: "error",
-        detail: message
+        detail
       };
     }
   }
 
   async interrupt(threadId: string, turnId: string): Promise<void> {
-    await this.client.request("turn/interrupt", {
-      threadId,
-      turnId
-    });
+    await this.client.request(
+      "turn/interrupt",
+      {
+        threadId,
+        turnId
+      },
+      5_000
+    );
   }
 
   async runTurn(input: RunTurnInput): Promise<RunTurnResult> {
-    const threadId = input.threadId ?? (await this.startThread(input.cwd));
+    const threadId = input.threadId ?? (await this.startThread(input.cwd, input.sessionTitle, input.sessionKind));
     let turnId = "";
     let readyForDeltas = false;
     const queuedDeltas: string[] = [];
     const itemBuffers = new Map<string, string>();
+    const bufferedNotifications = new Map<string, unknown[]>();
     let deltaChain = Promise.resolve();
+    let settleTurnCompletion: ((error?: Error) => void) | null = null;
+    const turnCompletion = new Promise<void>((resolve, reject) => {
+      settleTurnCompletion = (error?: Error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      };
+    });
 
     const flushDelta = (delta: string) => {
       deltaChain = deltaChain.then(() => input.onDelta(delta));
       return deltaChain;
     };
 
-    const listener = async (message: unknown) => {
-      if (!isNotification(message)) {
+    const handleTurnNotification = async (message: unknown) => {
+      if (!isNotification(message) || notificationTurnId(message) !== turnId) {
         return;
       }
 
@@ -129,7 +154,37 @@ export class CodexBridge {
           return;
         }
         await flushDelta(unseen);
+        return;
       }
+
+      if (message.method === "turn/completed" && readObject(message.params, "turn")?.id === turnId) {
+        settleTurnCompletion?.();
+        return;
+      }
+
+      if (message.method === "error" && readString(message.params, "turnId") === turnId) {
+        settleTurnCompletion?.(new Error(readErrorMessage(message.params) ?? "Codex turn failed."));
+      }
+    };
+
+    const listener = async (message: unknown) => {
+      if (!isNotification(message)) {
+        return;
+      }
+
+      const messageTurnId = notificationTurnId(message);
+      if (!messageTurnId) {
+        return;
+      }
+
+      if (!turnId) {
+        const buffered = bufferedNotifications.get(messageTurnId) ?? [];
+        buffered.push(message);
+        bufferedNotifications.set(messageTurnId, buffered);
+        return;
+      }
+
+      await handleTurnNotification(message);
     };
 
     this.client.on("notification", listener);
@@ -147,14 +202,20 @@ export class CodexBridge {
       });
 
       turnId = turn.turn.id;
+      const earlyNotifications = bufferedNotifications.get(turnId) ?? [];
+      bufferedNotifications.delete(turnId);
       await input.onTurnStarted({ threadId, turnId });
       readyForDeltas = true;
+
+      for (const notification of earlyNotifications) {
+        await handleTurnNotification(notification);
+      }
 
       for (const queued of queuedDeltas.splice(0, queuedDeltas.length)) {
         await flushDelta(queued);
       }
 
-      await this.waitForTurnCompletion(turnId);
+      await turnCompletion;
       await deltaChain;
       return { threadId, turnId };
     } catch (error) {
@@ -165,13 +226,12 @@ export class CodexBridge {
     }
   }
 
-  private async startThread(cwd: string): Promise<string> {
+  private async startThread(cwd: string, sessionTitle: string, sessionKind: SessionKind): Promise<string> {
     const response = await this.client.request<ThreadStartResponse>("thread/start", {
       cwd,
       approvalPolicy: "never",
       sandbox: "workspace-write",
-      baseInstructions:
-        "You are being used through Adam Connect from a trusted paired phone. Stay inside the current working directory unless the user explicitly asks otherwise and the workspace permits it.",
+      baseInstructions: buildThreadInstructions({ sessionTitle, sessionKind }),
       experimentalRawEvents: false,
       persistExtendedHistory: false,
       ephemeral: false
@@ -180,36 +240,17 @@ export class CodexBridge {
     return response.thread.id;
   }
 
-  private async waitForTurnCompletion(turnId: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const listener = (message: unknown) => {
-        if (!isNotification(message)) {
-          return;
-        }
-
-        if (message.method === "turn/completed" && readObject(message.params, "turn")?.id === turnId) {
-          cleanup();
-          resolve();
-          return;
-        }
-
-        if (message.method === "error" && readString(message.params, "turnId") === turnId) {
-          cleanup();
-          reject(new Error(readErrorMessage(message.params) ?? "Codex turn failed."));
-        }
-      };
-
-      const cleanup = () => {
-        this.client.off("notification", listener);
-      };
-
-      this.client.on("notification", listener);
-    });
-  }
 }
 
 function isNotification(value: unknown): value is { method: string; params?: unknown } {
   return typeof value === "object" && value !== null && "method" in value;
+}
+
+function notificationTurnId(message: { method: string; params?: unknown }): string | null {
+  if (message.method === "turn/completed") {
+    return readObject(message.params, "turn")?.id as string | null;
+  }
+  return readString(message.params, "turnId");
 }
 
 function matchesTurn(params: unknown, turnId: string): boolean {

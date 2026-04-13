@@ -1,46 +1,74 @@
 import { create } from "zustand";
-import type { ChatMessage, ChatSession, HostStatus, StreamEvent } from "@adam-connect/shared";
+import { buildProjectStarterPrompt } from "@adam-connect/shared";
+import type { ChatMessage, ChatSession, HostStatus, InputMode, NotificationEvent, PairedDevice, ResponseStyle, StreamEvent } from "@adam-connect/shared";
+import type { ProjectTemplateId } from "@adam-connect/shared";
 import { ApiClient } from "../services/api/client";
 import { clearSettings, loadSettings, saveSettings } from "../services/storage/settingsStorage";
 import { clearDeviceToken, loadDeviceToken, saveDeviceToken } from "../services/storage/tokenStorage";
+import { FcmService } from "../services/notifications/fcmService";
 import { TtsService } from "../services/voice/ttsService";
 import { VoiceService } from "../services/voice/voiceService";
 import { normalizeBaseUrl, websocketUrlFromBase } from "../config";
 import { DEFAULT_BASE_URL } from "../generated/runtimeConfig";
 import {
   findOperatorSession,
+  findStopTargetSession,
   isPairingRepairErrorMessage,
   isSessionBusy,
+  isQueuedVoiceAutoSendPending,
   OPERATOR_SESSION_TITLE,
   pairingRepairMessage,
+  findSendTargetSession,
   pickPreferredSessionId,
   requiresVoiceReview,
   sortSessionsForDisplay
 } from "../utils/operatorConsole";
 
 type View = "host" | "sessions" | "chat";
-type EditableField = "baseUrl" | "deviceName" | "pairingCode" | "composer" | "newSessionRootPath" | "newSessionTitle";
+type EditableField =
+  | "baseUrl"
+  | "deviceName"
+  | "pairingCode"
+  | "composer"
+  | "newSessionRootPath"
+  | "newSessionTitle"
+  | "responseStyle"
+  | "projectIntent"
+  | "projectInstructions"
+  | "projectOutputType"
+  | "projectTemplateId";
 
 export interface AppState {
   booting: boolean;
   refreshing: boolean;
+  sendingMessage: boolean;
   realtimeConnected: boolean;
   view: View;
   baseUrl: string;
   deviceName: string;
   pairingCode: string;
   token: string | null;
+  currentDeviceId: string | null;
   hostStatus: HostStatus | null;
+  devices: PairedDevice[];
   sessions: ChatSession[];
   selectedSessionId: string | null;
   messagesBySession: Record<string, ChatMessage[]>;
   composer: string;
+  composerInputMode: InputMode;
   newSessionRootPath: string;
   newSessionTitle: string;
+  projectIntent: string;
+  projectInstructions: string;
+  projectOutputType: string;
+  projectTemplateId: ProjectTemplateId;
+  responseStyle: ResponseStyle;
   renameDraftBySession: Record<string, string>;
   autoSpeak: boolean;
   autoSendVoice: boolean;
   voiceAvailable: boolean;
+  pushAvailable: boolean;
+  pushSyncing: boolean;
   listening: boolean;
   lastSpokenMessageId: string | null;
   notice: string | null;
@@ -49,15 +77,22 @@ export interface AppState {
   connectPairing(): Promise<void>;
   disconnect(): Promise<void>;
   refresh(): Promise<void>;
+  reconnectRealtime(): Promise<void>;
   selectSession(sessionId: string): Promise<void>;
-  createSession(): Promise<void>;
+  createProjectSession(): Promise<void>;
   renameSession(sessionId: string): Promise<void>;
   deleteSession(sessionId: string): Promise<void>;
   sendMessage(): Promise<void>;
   stopSession(): Promise<void>;
+  renameCurrentDevice(): Promise<void>;
+  enablePushNotifications(): Promise<void>;
+  toggleNotificationPreference(event: NotificationEvent): Promise<void>;
+  sendDeviceTestNotification(deviceId: string, event: NotificationEvent): Promise<void>;
+  revokeDevice(deviceId: string): Promise<void>;
   toggleAutoSpeak(): Promise<void>;
   toggleAutoSendVoice(): Promise<void>;
   toggleListening(): Promise<void>;
+  setResponseStyle(style: ResponseStyle): Promise<void>;
   setRenameDraft(sessionId: string, value: string): void;
   setField<K extends EditableField>(field: K, value: AppState[K]): void;
   setView(view: View): void;
@@ -65,29 +100,42 @@ export interface AppState {
 
 const api = new ApiClient();
 const voice = new VoiceService();
+const fcm = new FcmService();
 const tts = new TtsService();
 let socket: WebSocket | null = null;
+let unsubscribePushTokenRefresh: (() => void) | null = null;
 
 export const useAppStore = create<AppState>((set, get) => ({
   booting: true,
   refreshing: false,
+  sendingMessage: false,
   realtimeConnected: false,
   view: "host",
   baseUrl: DEFAULT_BASE_URL,
   deviceName: "Adam's Phone",
   pairingCode: "",
   token: null,
+  currentDeviceId: null,
   hostStatus: null,
+  devices: [],
   sessions: [],
   selectedSessionId: null,
   messagesBySession: {},
   composer: "",
+  composerInputMode: "text",
   newSessionRootPath: "",
   newSessionTitle: "",
+  projectIntent: "",
+  projectInstructions: "",
+  projectOutputType: "implementation plan",
+  projectTemplateId: "greenfield",
+  responseStyle: "natural",
   renameDraftBySession: {},
   autoSpeak: false,
   autoSendVoice: true,
   voiceAvailable: false,
+  pushAvailable: false,
+  pushSyncing: false,
   listening: false,
   lastSpokenMessageId: null,
   notice: null,
@@ -102,10 +150,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       baseUrl: settings?.baseUrl ?? DEFAULT_BASE_URL,
       deviceName: settings?.deviceName ?? "Adam's Phone",
+      currentDeviceId: settings?.currentDeviceId ?? null,
       autoSpeak: settings?.autoSpeak ?? false,
       autoSendVoice: settings?.autoSendVoice ?? true,
+      responseStyle: settings?.responseStyle ?? "natural",
       token,
       voiceAvailable,
+      pushAvailable: fcm.isAvailable(),
       realtimeConnected: false,
       notice: token ? "Restoring the saved desktop link." : null,
       booting: false
@@ -113,6 +164,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (settings?.baseUrl && token) {
       await get().refresh();
+      syncPushTokenRefresh(settings.baseUrl, token, get, set);
       connectSocket(settings.baseUrl, token, set, get);
     }
   },
@@ -124,13 +176,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       await saveSettings({
         baseUrl,
         deviceName: get().deviceName.trim(),
+        currentDeviceId: paired.device.id,
         autoSpeak: get().autoSpeak,
-        autoSendVoice: get().autoSendVoice
+        autoSendVoice: get().autoSendVoice,
+        responseStyle: get().responseStyle
       });
       await saveDeviceToken(paired.deviceToken);
       set({
         token: paired.deviceToken,
         baseUrl,
+        currentDeviceId: paired.device.id,
+        devices: [paired.device],
         hostStatus: {
           host: paired.host,
           auth: { status: "logged_out", detail: "Waiting for desktop heartbeat." },
@@ -141,9 +197,13 @@ export const useAppStore = create<AppState>((set, get) => ({
             dnsName: null,
             ipv4: null,
             suggestedUrl: null,
+            transportSecurity: "insecure",
             installUrl: "https://tailscale.com/download",
             loginUrl: "https://login.tailscale.com/start"
           },
+          availability: "reconnecting",
+          repairState: "reconnecting",
+          runState: "ready",
           activeSessionCount: 0,
           pairedDeviceCount: 1
         },
@@ -153,6 +213,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         notice: "Phone paired. The Operator chat will be ready for quick turns.",
         view: "host"
       });
+      syncPushTokenRefresh(baseUrl, paired.deviceToken, get, set);
       connectSocket(baseUrl, paired.deviceToken, set, get);
       await get().refresh();
       await ensureOperatorSession(get, set);
@@ -166,23 +227,33 @@ export const useAppStore = create<AppState>((set, get) => ({
   async disconnect() {
     disconnectSocket();
     tts.stop();
+    unsubscribePushTokenRefresh?.();
+    unsubscribePushTokenRefresh = null;
     await Promise.all([clearSettings(), clearDeviceToken()]);
     set({
       baseUrl: DEFAULT_BASE_URL,
       pairingCode: "",
       token: null,
+      currentDeviceId: null,
       hostStatus: null,
+      devices: [],
       sessions: [],
       selectedSessionId: null,
       messagesBySession: {},
       composer: "",
+      composerInputMode: "text",
       newSessionRootPath: "",
       newSessionTitle: "",
+      projectIntent: "",
+      projectInstructions: "",
+      projectOutputType: "implementation plan",
+      projectTemplateId: "greenfield",
       renameDraftBySession: {},
       autoSendVoice: true,
       lastSpokenMessageId: null,
       notice: null,
       refreshing: false,
+      sendingMessage: false,
       realtimeConnected: false,
       error: null,
       view: "host"
@@ -193,15 +264,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
     set({ refreshing: true });
     try {
-      const [hostStatus, sessions] = await Promise.all([
+      const [hostStatus, sessions, devices] = await Promise.all([
         api.getHostStatus(token, baseUrl),
-        api.listSessions(token, baseUrl)
+        api.listSessions(token, baseUrl),
+        api.listDevices(token, baseUrl)
       ]);
       const currentSelected = get().selectedSessionId;
       const nextSelected = pickPreferredSessionId(currentSelected, sessions);
+      const currentDeviceId =
+        get().currentDeviceId && devices.some((device) => device.id === get().currentDeviceId)
+          ? get().currentDeviceId
+          : devices.find((device) => device.deviceName === get().deviceName)?.id ?? devices[0]?.id ?? null;
+
+      if (currentDeviceId !== get().currentDeviceId) {
+        await saveSettings({
+          baseUrl,
+          deviceName: get().deviceName,
+          currentDeviceId,
+          autoSpeak: get().autoSpeak,
+          autoSendVoice: get().autoSendVoice,
+          responseStyle: get().responseStyle
+        });
+      }
 
       set({
         hostStatus,
+        devices,
+        currentDeviceId,
         sessions: sortSessionsForDisplay(sessions),
         selectedSessionId: nextSelected,
         newSessionRootPath: get().newSessionRootPath || hostStatus.host.approvedRoots[0] || "",
@@ -226,14 +315,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
 
-      if (!socket || socket.readyState === WebSocket.CLOSED) {
+      if (!socket || socket.readyState === WebSocket.CLOSED || !get().realtimeConnected) {
         connectSocket(baseUrl, token, set, get);
       }
+
+      maybeAutoSendVoiceResult(get, set).catch(() => undefined);
     } catch (error) {
       await handleStoreError(error, set, get, "Could not refresh this phone's desktop state.");
     } finally {
       set({ refreshing: false });
     }
+  },
+  async reconnectRealtime() {
+    const token = requireValue(get().token, "Pair this phone with the desktop first.");
+    const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+    set({ notice: "Reconnecting the realtime desktop link.", error: null, realtimeConnected: false });
+    connectSocket(baseUrl, token, set, get);
+    await get().refresh();
   },
   async selectSession(sessionId: string) {
     try {
@@ -254,31 +352,65 @@ export const useAppStore = create<AppState>((set, get) => ({
       await handleStoreError(error, set, get, "Could not open that chat.");
     }
   },
-  async createSession() {
+  async createProjectSession() {
     try {
       const token = requireValue(get().token, "Pair this phone with the desktop first.");
       const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
       const rootPath = get().newSessionRootPath || get().hostStatus?.host.approvedRoots[0];
       const title = get().newSessionTitle.trim();
+      const intent = get().projectIntent.trim();
+
+      if (!intent) {
+        set({ error: "Add a project goal so Codex knows how to kick this chat off." });
+        return;
+      }
+
+      const starterPrompt = buildProjectStarterPrompt({
+        projectName: title,
+        rootPath,
+        intent,
+        starterInstructions: get().projectInstructions,
+        desiredOutputType: get().projectOutputType,
+        templateId: get().projectTemplateId,
+        responseStyle: get().responseStyle
+      });
+
       const session = await api.createSession(token, baseUrl, {
         rootPath,
+        kind: "project",
+        starterPrompt,
         ...(title ? { title } : {})
       });
+      const kickoffMessage = await api.postMessage(token, baseUrl, session.id, {
+        text: starterPrompt,
+        inputMode: "text",
+        responseStyle: get().responseStyle,
+        transcriptPolished: true
+      });
+
       set((state) => ({
         sessions: sortSessionsForDisplay([session, ...state.sessions.filter((item) => item.id !== session.id)]),
         selectedSessionId: session.id,
         newSessionTitle: "",
+        projectIntent: "",
+        projectInstructions: "",
+        projectOutputType: "implementation plan",
+        projectTemplateId: "greenfield",
         renameDraftBySession: {
           ...state.renameDraftBySession,
           [session.id]: session.title
         },
+        messagesBySession: {
+          ...state.messagesBySession,
+          [session.id]: [...(state.messagesBySession[session.id] ?? []), kickoffMessage]
+        },
         view: "chat",
-        notice: null,
+        notice: "Project kickoff sent. Codex is starting with the new project brief.",
         error: null
       }));
-      await get().selectSession(session.id);
+      await get().refresh();
     } catch (error) {
-      await handleStoreError(error, set, get, "Could not start a new chat.");
+      await handleStoreError(error, set, get, "Could not start the project kickoff.");
     }
   },
   async renameSession(sessionId: string) {
@@ -344,6 +476,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   async sendMessage() {
+    if (get().sendingMessage) {
+      return;
+    }
+
     try {
       const token = requireValue(get().token, "Pair this phone with the desktop first.");
       const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
@@ -365,10 +501,30 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       }
       const resolvedSessionId = requireValue(sessionId, "Open or start a chat before sending a message.");
+      const targetSession = findSendTargetSession(resolvedSessionId, get().sessions);
+      if (isSessionBusy(targetSession)) {
+        set({
+          notice:
+            get().composerInputMode === "voice" && get().autoSendVoice
+              ? "Voice captured. Codex is still busy, so your transcript will send automatically when this run finishes or you tap Stop."
+              : "Codex is still busy with the current run. Your draft is staying in the composer until this run finishes or you tap Stop.",
+          error: null,
+          view: "chat"
+        });
+        return;
+      }
 
-      const message = await api.postMessage(token, baseUrl, resolvedSessionId, { text });
+      set({ sendingMessage: true, error: null });
+      const message = await api.postMessage(token, baseUrl, resolvedSessionId, {
+        text,
+        inputMode: get().composerInputMode,
+        responseStyle: get().responseStyle,
+        transcriptPolished: get().composerInputMode === "voice_polished"
+      });
       set((state) => ({
         composer: "",
+        composerInputMode: "text",
+        sendingMessage: false,
         notice: null,
         messagesBySession: {
           ...state.messagesBySession,
@@ -379,13 +535,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       await handleStoreError(error, set, get, "Could not send that message.");
+    } finally {
+      set({ sendingMessage: false });
     }
   },
   async stopSession() {
     try {
       const token = requireValue(get().token, "Pair this phone with the desktop first.");
       const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-      const sessionId = requireValue(get().selectedSessionId, "Open a chat before stopping a run.");
+      const sessionId = requireValue(findStopTargetSession(get().selectedSessionId, get().sessions)?.id, "Open a busy chat before stopping a run.");
       await api.stopSession(token, baseUrl, sessionId);
       set({ notice: "Stop requested. Waiting for the desktop to halt the current run.", error: null });
       await get().refresh();
@@ -393,13 +551,120 @@ export const useAppStore = create<AppState>((set, get) => ({
       await handleStoreError(error, set, get, "Could not stop the current run.");
     }
   },
+  async renameCurrentDevice() {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const deviceId = requireValue(get().currentDeviceId, "Current device settings are not available yet.");
+      const renamed = await api.renameDevice(token, baseUrl, deviceId, {
+        deviceName: get().deviceName.trim()
+      });
+      await saveSettings({
+        baseUrl,
+        deviceName: renamed.deviceName,
+        currentDeviceId: deviceId,
+        autoSpeak: get().autoSpeak,
+        autoSendVoice: get().autoSendVoice,
+        responseStyle: get().responseStyle
+      });
+      set((state) => ({
+        deviceName: renamed.deviceName,
+        devices: state.devices.map((device) => (device.id === renamed.id ? renamed : device)),
+        notice: "This phone's device name was updated.",
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not rename this phone.");
+    }
+  },
+  async enablePushNotifications() {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const deviceId = requireValue(get().currentDeviceId, "Current device settings are not available yet.");
+      set({ pushSyncing: true, notice: null, error: null });
+      const pushToken = await fcm.requestPushToken();
+      const updatedDevice = await api.registerPushToken(token, baseUrl, deviceId, { pushToken });
+      syncPushTokenRefresh(baseUrl, token, get, set);
+      await saveSettings({
+        baseUrl,
+        deviceName: get().deviceName,
+        currentDeviceId: deviceId,
+        autoSpeak: get().autoSpeak,
+        autoSendVoice: get().autoSendVoice,
+        responseStyle: get().responseStyle
+      });
+      set((state) => ({
+        devices: state.devices.map((device) => (device.id === updatedDevice.id ? updatedDevice : device)),
+        pushSyncing: false,
+        notice: "Android background updates are enabled for this phone.",
+        error: null
+      }));
+    } catch (error) {
+      set({ pushSyncing: false });
+      await handleStoreError(error, set, get, "Could not enable Android background updates.");
+    }
+  },
+  async toggleNotificationPreference(event) {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const deviceId = requireValue(get().currentDeviceId, "Current device settings are not available yet.");
+      const currentDevice = get().devices.find((device) => device.id === deviceId);
+      if (!currentDevice) {
+        throw new Error("Current device settings are not available yet.");
+      }
+      const updatedDevice = await api.updateNotificationPrefs(token, baseUrl, deviceId, {
+        ...currentDevice.notificationPrefs,
+        [event]: !currentDevice.notificationPrefs[event]
+      });
+      set((state) => ({
+        devices: state.devices.map((device) => (device.id === updatedDevice.id ? updatedDevice : device)),
+        notice: null,
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not update Android background update preferences.");
+    }
+  },
+  async sendDeviceTestNotification(deviceId, event) {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      await api.sendTestNotification(token, baseUrl, deviceId, event);
+      await get().refresh();
+      set({ notice: "Test notification requested.", error: null });
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not send a test notification.");
+    }
+  },
+  async revokeDevice(deviceId) {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const revoked = await api.revokeDevice(token, baseUrl, deviceId);
+      if (deviceId === get().currentDeviceId) {
+        await enterRepairMode(set, get, "This phone was revoked. Pair again with the saved desktop URL and pairing code.");
+        return;
+      }
+      set((state) => ({
+        devices: state.devices.filter((device) => device.id !== revoked.id),
+        notice: `${revoked.deviceName} was revoked.`,
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not revoke that device.");
+    }
+  },
   async toggleAutoSpeak() {
     const next = !get().autoSpeak;
     await saveSettings({
       baseUrl: get().baseUrl,
       deviceName: get().deviceName,
+      currentDeviceId: get().currentDeviceId,
       autoSpeak: next,
-      autoSendVoice: get().autoSendVoice
+      autoSendVoice: get().autoSendVoice,
+      responseStyle: get().responseStyle
     });
     set({ autoSpeak: next });
   },
@@ -408,8 +673,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     await saveSettings({
       baseUrl: get().baseUrl,
       deviceName: get().deviceName,
+      currentDeviceId: get().currentDeviceId,
       autoSpeak: get().autoSpeak,
-      autoSendVoice: next
+      autoSendVoice: next,
+      responseStyle: get().responseStyle
     });
     set({ autoSendVoice: next });
   },
@@ -436,6 +703,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (get().autoSendVoice && requiresVoiceReview(text)) {
             set({
               composer: text,
+              composerInputMode: "voice_polished",
               listening: false,
               notice: "Review the captured voice transcript before sending. Auto-send paused for this turn.",
               error: null,
@@ -444,8 +712,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             return;
           }
 
-          set({ composer: text, listening: false, notice: null, error: null, view: "chat" });
-          void maybeAutoSendVoiceResult(get, set);
+          set({ composer: text, composerInputMode: "voice", listening: false, notice: null, error: null, view: "chat" });
+          maybeAutoSendVoiceResult(get, set).catch(() => undefined);
         },
         (message) => {
           set({ listening: false, notice: null, error: message });
@@ -461,6 +729,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw error;
     }
   },
+  async setResponseStyle(style) {
+    await saveSettings({
+      baseUrl: get().baseUrl,
+      deviceName: get().deviceName,
+      currentDeviceId: get().currentDeviceId,
+      autoSpeak: get().autoSpeak,
+      autoSendVoice: get().autoSendVoice,
+      responseStyle: style
+    });
+    set({ responseStyle: style, notice: `Reply style set to ${style}.`, error: null });
+  },
   setRenameDraft(sessionId, value) {
     set((state) => ({
       renameDraftBySession: {
@@ -470,6 +749,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
   setField(field, value) {
+    if (field === "composer" && value === "") {
+      set({ composer: "", composerInputMode: "text" });
+      return;
+    }
     set({ [field]: value } as Pick<AppState, typeof field>);
   },
   setView(view) {
@@ -485,47 +768,59 @@ function connectSocket(
 ): void {
   disconnectSocket({ keepReconnectIntent: true });
   shouldReconnect = true;
-  const nextSocket = new WebSocket(`${websocketUrlFromBase(baseUrl)}?token=${encodeURIComponent(token)}`);
-  let dropHandled = false;
-  socket = nextSocket;
-
-  nextSocket.onopen = () => {
-    if (socket !== nextSocket) {
-      return;
-    }
-    reconnectAttempts = 0;
-    clearReconnectTimer();
-    set({ realtimeConnected: true, error: null });
-    void get().refresh().catch(() => undefined);
-  };
-
-  nextSocket.onmessage = (event) => {
+  const startRealtime = async () => {
     try {
-      const payload = JSON.parse(String(event.data)) as StreamEvent | { type: "hello" };
-      if (payload.type === "hello") {
-        return;
-      }
-      applyStreamEvent(payload, set, get);
-    } catch {
-      set({ error: "Received an invalid realtime payload from the desktop gateway." });
+      const realtime = await api.createRealtimeTicket(token, baseUrl);
+      const nextSocket = new WebSocket(`${websocketUrlFromBase(baseUrl)}?ticket=${encodeURIComponent(realtime.ticket)}`);
+      let dropHandled = false;
+      socket = nextSocket;
+
+      nextSocket.onopen = () => {
+        if (socket !== nextSocket) {
+          return;
+        }
+        reconnectAttempts = 0;
+        clearReconnectTimer();
+        set({ realtimeConnected: true, error: null });
+        get().refresh().catch(() => undefined);
+      };
+
+      nextSocket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(String(event.data)) as StreamEvent | { type: "hello" };
+          if (payload.type === "hello") {
+            return;
+          }
+          applyStreamEvent(payload, set, get);
+        } catch {
+          set({ error: "Received an invalid realtime payload from the desktop gateway." });
+        }
+      };
+
+      const handleDrop = () => {
+        if (dropHandled || socket !== nextSocket) {
+          return;
+        }
+        dropHandled = true;
+        socket = null;
+        set({
+          realtimeConnected: false,
+          error: "Realtime connection dropped. Reconnecting now. Pull to refresh, tap Refresh Host, or reopen the app if it does not recover."
+        });
+        scheduleReconnect(baseUrl, token, set, get);
+      };
+
+      nextSocket.onerror = handleDrop;
+      nextSocket.onclose = handleDrop;
+    } catch (error) {
+      set({
+        realtimeConnected: false,
+        error: error instanceof Error ? error.message : "Realtime connection setup failed."
+      });
+      scheduleReconnect(baseUrl, token, set, get);
     }
   };
-
-  const handleDrop = () => {
-    if (dropHandled || socket !== nextSocket) {
-      return;
-    }
-    dropHandled = true;
-    socket = null;
-    set({
-      realtimeConnected: false,
-      error: "Realtime connection dropped. Reconnecting now. Pull to refresh, tap Refresh Host, or reopen the app if it does not recover."
-    });
-    scheduleReconnect(baseUrl, token, set, get);
-  };
-
-  nextSocket.onerror = handleDrop;
-  nextSocket.onclose = handleDrop;
+  startRealtime().catch(() => undefined);
 }
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -596,6 +891,9 @@ function applyStreamEvent(
         [payload.session.id]: payload.session.title
       }
     }));
+    if (!isSessionBusy(payload.session)) {
+      maybeAutoSendVoiceResult(get, set).catch(() => undefined);
+    }
     return;
   }
 
@@ -663,7 +961,8 @@ async function ensureOperatorSession(
 
   const session = await api.createSession(token, baseUrl, {
     rootPath,
-    title: OPERATOR_SESSION_TITLE
+    title: OPERATOR_SESSION_TITLE,
+    kind: "operator"
   });
 
   set((state) => ({
@@ -685,12 +984,17 @@ async function maybeAutoSendVoiceResult(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): Promise<void> {
-  if (!get().autoSendVoice) {
+  if (!isQueuedVoiceAutoSendPending(get().autoSendVoice, get().composer, get().composerInputMode) || get().sendingMessage) {
     return;
   }
 
-  const selectedSession = get().sessions.find((item) => item.id === get().selectedSessionId) ?? findOperatorSession(get().sessions) ?? null;
-  if (isSessionBusy(selectedSession)) {
+  const targetSession = findSendTargetSession(get().selectedSessionId, get().sessions);
+  if (isSessionBusy(targetSession)) {
+    set({
+      notice: "Voice captured. Codex is still busy, so your transcript is waiting in the composer until this run finishes or you tap Stop.",
+      error: null,
+      view: "chat"
+    });
     return;
   }
 
@@ -726,6 +1030,8 @@ async function enterRepairMode(
 ): Promise<void> {
   disconnectSocket();
   tts.stop();
+  unsubscribePushTokenRefresh?.();
+  unsubscribePushTokenRefresh = null;
   await clearDeviceToken();
   set({
     token: null,
@@ -734,15 +1040,44 @@ async function enterRepairMode(
     selectedSessionId: null,
     messagesBySession: {},
     composer: "",
+    composerInputMode: "text",
     newSessionRootPath: "",
     newSessionTitle: "",
+    projectIntent: "",
+    projectInstructions: "",
+    projectOutputType: "implementation plan",
+    projectTemplateId: "greenfield",
     renameDraftBySession: {},
     refreshing: false,
+    sendingMessage: false,
     realtimeConnected: false,
     listening: false,
     lastSpokenMessageId: null,
     notice: "Saved desktop settings were kept so you can repair this link quickly.",
     error: message,
     view: "host"
+  });
+}
+
+function syncPushTokenRefresh(
+  baseUrl: string,
+  token: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+): void {
+  unsubscribePushTokenRefresh?.();
+  unsubscribePushTokenRefresh = fcm.subscribeToTokenRefresh((pushToken) => {
+    const currentDeviceId = get().currentDeviceId;
+    if (!currentDeviceId) {
+      return;
+    }
+    api
+      .registerPushToken(token, baseUrl, currentDeviceId, { pushToken })
+      .then((updatedDevice) => {
+        set((state) => ({
+          devices: state.devices.map((device) => (device.id === updatedDevice.id ? updatedDevice : device))
+        }));
+      })
+      .catch(() => undefined);
   });
 }

@@ -11,22 +11,37 @@ import type {
   HostStatus,
   HostWorkItem,
   PairingCompleteResponse,
+  PairedDevice,
   PostMessageRequest,
+  RealtimeTicketResponse,
+  RegisterPushTokenRequest,
   RegisterHostRequest,
   RegisterHostResponse
 } from "../schemas/platform.js";
-import type { UpdateSessionRequest } from "../schemas/platform.js";
+import type {
+  NotificationEvent,
+  RenameDeviceRequest,
+  UpdateNotificationPrefsRequest,
+  UpdateSessionRequest
+} from "../schemas/platform.js";
 
 export interface MobileApi {
   completePairing(baseUrl: string, pairingCode: string, deviceName: string): Promise<PairingCompleteResponse>;
   getHostStatus(token: string): Promise<HostStatus>;
   listSessions(token: string): Promise<ChatSession[]>;
+  listDevices(token: string): Promise<PairedDevice[]>;
   createSession(token: string, input: CreateSessionRequest): Promise<ChatSession>;
   updateSession(token: string, sessionId: string, input: UpdateSessionRequest): Promise<ChatSession>;
   deleteSession(token: string, sessionId: string): Promise<{ ok: true; deletedSessionId: string }>;
   listMessages(token: string, sessionId: string): Promise<ChatMessage[]>;
   postMessage(token: string, sessionId: string, input: PostMessageRequest): Promise<ChatMessage>;
   stopSession(token: string, sessionId: string): Promise<ChatSession>;
+  createRealtimeTicket(token: string): Promise<RealtimeTicketResponse>;
+  renameDevice(token: string, deviceId: string, input: RenameDeviceRequest): Promise<PairedDevice>;
+  revokeDevice(token: string, deviceId: string): Promise<PairedDevice>;
+  registerPushToken(token: string, deviceId: string, input: RegisterPushTokenRequest): Promise<PairedDevice>;
+  updateNotificationPrefs(token: string, deviceId: string, input: UpdateNotificationPrefsRequest): Promise<PairedDevice>;
+  sendTestNotification(token: string, deviceId: string, event: NotificationEvent): Promise<{ ok: true; deviceId: string }>;
 }
 
 export interface HostApi {

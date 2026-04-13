@@ -19,15 +19,21 @@ export function LabeledInput(props: {
   value: string;
   onChange(value: string): void;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  multiline?: boolean;
+  placeholder?: string;
 }): React.JSX.Element {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.inputLabel}>{props.label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, props.multiline ? styles.inputMultiline : null]}
         value={props.value}
         onChangeText={props.onChange}
         autoCapitalize={props.autoCapitalize ?? "none"}
+        placeholder={props.placeholder}
+        placeholderTextColor="#64748b"
+        multiline={props.multiline}
+        textAlignVertical={props.multiline ? "top" : "center"}
       />
     </View>
   );

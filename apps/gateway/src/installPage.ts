@@ -97,6 +97,7 @@ export function renderDesktopPage(model: InstallPageModel): string {
   const roots = hostStatus?.host.approvedRoots ?? [];
   const recentSessionActivity = overview.recentSessionActivity;
   const recentDevices = overview.recentDevices;
+  const auditEvents = overview.auditEvents;
 
   return renderPage({
     title: "Adam Connect Desktop",
@@ -113,13 +114,13 @@ export function renderDesktopPage(model: InstallPageModel): string {
               like a real app.
             </p>
             <div class="button-row">
-              <a class="button button-primary" href="${escapeHtml(installUrl)}">Open Phone Install Page</a>
+              <a class="button button-primary" href="#phone-setup" data-tab-open="phone-setup">Open Phone Setup</a>
               ${
                 apkDownloadUrl
-                  ? `<a class="button button-secondary" href="${escapeHtml(apkDownloadUrl)}">Download Android APK</a>`
+                  ? `<a class="button button-secondary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
                   : `<span class="button button-muted">Android APK not built yet</span>`
               }
-              <a class="button button-ghost" href="${escapeHtml(`${publicBaseUrl}/install/qr.svg`)}">Open QR Image</a>
+              <a class="button button-ghost" href="#phone-setup" data-tab-open="phone-setup">Show QR In App</a>
             </div>
             <div class="status-row">
               <span class="pill pill-teal">${hostStatus?.host.isOnline ? "Host online" : "Host offline"}</span>
@@ -176,34 +177,35 @@ export function renderDesktopPage(model: InstallPageModel): string {
 
         <section class="tab-shell">
           <nav class="tab-bar panel" aria-label="Desktop functions" role="tablist">
-            ${renderDesktopTabButton("overview", "Overview", true)}
-            ${renderDesktopTabButton("pairing", "Pairing")}
-            ${renderDesktopTabButton("chats", "Chats")}
-            ${renderDesktopTabButton("workspaces", "Workspaces")}
+            ${renderDesktopTabButton("operator", "Operator", true)}
+            ${renderDesktopTabButton("phone-setup", "Phone Setup")}
+            ${renderDesktopTabButton("activity", "Activity")}
             ${renderDesktopTabButton("devices", "Devices")}
+            ${renderDesktopTabButton("workspaces", "Workspaces")}
+            ${renderDesktopTabButton("settings", "Settings")}
           </nav>
 
-          <div class="tab-panel active" data-tab-panel="overview" role="tabpanel" aria-labelledby="tab-overview">
+          <div class="tab-panel active" data-tab-panel="operator" role="tabpanel" aria-labelledby="tab-operator">
             <section class="content-grid wide">
               <article class="panel section">
                 <div class="section-head">
                   <div>
-                    <span class="label">Desktop status</span>
-                    <h2>Health and readiness</h2>
+                    <span class="label">Operator Home</span>
+                    <h2>Keep the operator loop healthy</h2>
                   </div>
                 </div>
                 <div class="stack gap-md">
                   <div class="status-card">
-                    <strong>${escapeHtml(codexState)}</strong>
+                    <strong>${escapeHtml(humanizeAvailability(hostStatus?.availability ?? "needs_attention"))}</strong>
+                    <p>The native shell is now the supported desktop home. Use this view to monitor readiness, recovery, and quick phone onboarding.</p>
+                  </div>
+                  <div class="status-card">
+                    <strong>Current run state: ${escapeHtml(humanizeRunState(hostStatus?.runState ?? "ready"))}</strong>
                     <p>${escapeHtml(codexDetail)}</p>
                   </div>
                   <div class="status-card">
-                    <strong>${escapeHtml(tailscaleState)}</strong>
+                    <strong>Repair state: ${escapeHtml(humanizeRepairState(hostStatus?.repairState ?? "healthy"))}</strong>
                     <p>${escapeHtml(tailscaleDetail)}</p>
-                  </div>
-                  <div class="status-card">
-                    <strong>Local dashboard</strong>
-                    <p>Open <code>${escapeHtml(dashboardUrl)}</code> on this desktop any time to get back here.</p>
                   </div>
                 </div>
               </article>
@@ -211,74 +213,100 @@ export function renderDesktopPage(model: InstallPageModel): string {
               <article class="panel section">
                 <div class="section-head">
                   <div>
-                    <span class="label">Quick start</span>
-                    <h2>Use it like an app</h2>
+                    <span class="label">Quick Actions</span>
+                    <h2>Open the phone, pair fast, recover cleanly</h2>
                   </div>
                 </div>
-                <ol class="steps">
-                  <li>Run <code>npm run launch</code> from this repo.</li>
-                  <li>Keep this page open while the desktop host runs.</li>
-                  <li>Scan the QR code or open the phone install page over Tailscale.</li>
-                  <li>Install the Android APK, pair with the code, then chat.</li>
-                </ol>
-                <p class="muted">
-                  This dashboard refreshes automatically every 10 seconds so the pairing code, health, and chat activity stay current.
-                </p>
+                <div class="stack gap-sm">
+                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy Mobile URL</button></div>
+                  <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Pairing Code</button></div>
+                  <div class="button-row">
+                    <a class="button button-primary" href="#phone-setup" data-tab-open="phone-setup">Open Phone Setup Tab</a>
+                    <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
+                  </div>
+                  <div class="inline-qr-card">
+                    <div>
+                      <strong>Quick scan from this screen</strong>
+                      <p>Scan this from the phone without leaving the desktop app.</p>
+                    </div>
+                    <div class="qr-box qr-box-compact" aria-label="Adam Connect phone setup QR code">
+                      ${qrSvg}
+                    </div>
+                  </div>
+                </div>
               </article>
             </section>
           </div>
 
-          <div class="tab-panel" data-tab-panel="pairing" role="tabpanel" aria-labelledby="tab-pairing" hidden>
+          <div class="tab-panel" data-tab-panel="phone-setup" role="tabpanel" aria-labelledby="tab-phone-setup" hidden>
+            <section class="content-grid wide">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Phone Setup</span>
+                    <h2>Pair the phone without leaving Adam Connect</h2>
+                  </div>
+                </div>
+                <div class="stack gap-md">
+                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy Mobile URL</button></div>
+                  <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Pairing Code</button></div>
+                  <div class="status-card">
+                    <strong>Fast path</strong>
+                    <p>Open the app on the phone, scan the QR or paste the URL, then enter the pairing code shown here.</p>
+                  </div>
+                  <div class="button-row">
+                    ${
+                      apkDownloadUrl
+                        ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
+                        : `<span class="button button-muted">Android APK not built yet</span>`
+                    }
+                    <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel section qr-panel">
+                <div class="section-head">
+                  <div>
+                    <span class="label">QR Code</span>
+                    <h2>Scan this from the phone</h2>
+                  </div>
+                </div>
+                <div class="qr-box qr-box-large" aria-label="Adam Connect phone setup QR code">
+                  ${qrSvg}
+                </div>
+                <p class="muted">This QR opens the install page using the same Tailscale desktop address shown in the app.</p>
+              </article>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
             <section class="content-grid">
               <article class="panel section">
                 <div class="section-head">
                   <div>
-                    <span class="label">Phone onboarding</span>
-                    <h2>Install and pair in one place</h2>
-                  </div>
-                  <a class="text-link" href="${escapeHtml(installUrl)}">Open phone page</a>
-                </div>
-                <div class="qr-box">${qrSvg}</div>
-                <p class="muted">
-                  Scan this from your phone to open the install page directly. That page includes the APK download, desktop
-                  URL, and pairing flow.
-                </p>
-                <code>${escapeHtml(installUrl)}</code>
-              </article>
-
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Direct links</span>
-                    <h2>Phone-safe launch points</h2>
-                  </div>
-                </div>
-                <div class="stack gap-sm">
-                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy URL</button></div>
-                  <div class="token-row"><code>${escapeHtml(installUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(installUrl)}">Copy Install Page</button></div>
-                  ${
-                    apkDownloadUrl
-                      ? `<div class="token-row"><code>${escapeHtml(apkDownloadUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(apkDownloadUrl)}">Copy APK</button></div>`
-                      : `<div class="empty-state">Android APK not built yet.</div>`
-                  }
-                </div>
-              </article>
-            </section>
-          </div>
-
-          <div class="tab-panel" data-tab-panel="chats" role="tabpanel" aria-labelledby="tab-chats" hidden>
-            <section class="content-grid single">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Recent chats</span>
-                    <h2>See what the phone has been working on</h2>
+                    <span class="label">Recent Chats</span>
+                    <h2>See what Codex and the phone have been doing</h2>
                   </div>
                 </div>
                 ${
                   recentSessionActivity.length
                     ? `<div class="list-grid">${recentSessionActivity.map(renderSessionCard).join("")}</div>`
                     : `<div class="empty-state">No chat sessions yet. Pair the phone, start a chat, and it will show up here.</div>`
+                }
+              </article>
+
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Audit Timeline</span>
+                    <h2>Repairs, runs, and device activity</h2>
+                  </div>
+                </div>
+                ${
+                  auditEvents.length
+                    ? `<div class="list-grid compact">${auditEvents.map(renderAuditCard).join("")}</div>`
+                    : `<div class="empty-state">No operator events have been recorded yet.</div>`
                 }
               </article>
             </section>
@@ -324,6 +352,7 @@ export function renderDesktopPage(model: InstallPageModel): string {
                             <div class="list-card">
                               <strong>${escapeHtml(device.deviceName)}</strong>
                               <p>Last seen ${escapeHtml(timeAgo(device.lastSeenAt))}</p>
+                              <p>Repair count ${device.repairCount} · ${device.pushToken ? "Push ready" : "Push not set"}</p>
                               <span class="micro">${escapeHtml(device.id)}</span>
                             </div>
                           `
@@ -331,6 +360,51 @@ export function renderDesktopPage(model: InstallPageModel): string {
                         .join("")}</div>`
                     : `<div class="empty-state">No phone has paired yet.</div>`
                 }
+              </article>
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+            <section class="content-grid wide">
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Desktop Settings</span>
+                    <h2>Health, transport, and launch behavior</h2>
+                  </div>
+                </div>
+                <div class="stack gap-md">
+                  <div class="status-card">
+                    <strong>${escapeHtml(codexState)}</strong>
+                    <p>${escapeHtml(codexDetail)}</p>
+                  </div>
+                  <div class="status-card">
+                    <strong>${escapeHtml(tailscaleState)}</strong>
+                    <p>${escapeHtml(tailscaleDetail)}</p>
+                  </div>
+                  <div class="status-card">
+                    <strong>Transport security: ${escapeHtml(hostStatus?.tailscale.transportSecurity ?? "unknown")}</strong>
+                    <p>Adam Connect is tailnet-first. If secure transport is unavailable, treat this machine as needing attention until transport is upgraded.</p>
+                  </div>
+                </div>
+              </article>
+
+              <article class="panel section">
+                <div class="section-head">
+                  <div>
+                    <span class="label">Support Surfaces</span>
+                    <h2>Fallback links and packaging</h2>
+                  </div>
+                </div>
+                <div class="stack gap-sm">
+                  <div class="token-row"><code>${escapeHtml(dashboardUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(dashboardUrl)}">Copy Shell URL</button></div>
+                  <div class="token-row"><code>${escapeHtml(installUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(installUrl)}">Copy Install Page</button></div>
+                  ${
+                    apkDownloadUrl
+                      ? `<div class="token-row"><code>${escapeHtml(apkDownloadUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(apkDownloadUrl)}">Copy APK</button></div>`
+                      : `<div class="empty-state">Android APK not built yet.</div>`
+                  }
+                </div>
               </article>
             </section>
           </div>
@@ -364,7 +438,7 @@ export function renderInstallPage(model: InstallPageModel): string {
             <div class="button-row">
               ${
                 apkDownloadUrl
-                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}">Download Android APK</a>`
+                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
                   : `<span class="button button-muted">Android APK not available yet</span>`
               }
               <a class="button button-secondary" href="${escapeHtml(publicBaseUrl)}">Back to Desktop Dashboard</a>
@@ -414,8 +488,8 @@ export function renderInstallPage(model: InstallPageModel): string {
             <ol class="steps">
               <li>Open the Adam Connect app on Android.</li>
               <li>Enter the desktop URL and pairing code from this page. The QR code is optional convenience only.</li>
-              <li>Create a chat from one of the approved workspace roots.</li>
-              <li>Send a text prompt or use push-to-talk.</li>
+              <li>Let the default <code>Operator</code> chat restore first, or create a named project chat when you need a separate thread.</li>
+              <li>Send a text prompt or use <code>Talk To Codex</code>.</li>
             </ol>
             <p class="muted">Keep this URL handy for remote recovery. You only need the code again if you set up a new phone or reinstall the app.</p>
           </article>
@@ -512,14 +586,14 @@ function renderPage(input: { title: string; description: string; body: string })
 
       code {
         font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-        font-size: 0.96rem;
+        font-size: 0.88rem;
         word-break: break-word;
       }
 
       .shell {
         max-width: 1220px;
         margin: 0 auto;
-        padding: 28px 18px 54px;
+        padding: 20px 16px 38px;
       }
 
       .shell.narrow {
@@ -537,8 +611,8 @@ function renderPage(input: { title: string; description: string; body: string })
       .hero {
         display: grid;
         grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-        gap: 24px;
-        padding: 28px;
+        gap: 18px;
+        padding: 22px;
         overflow: hidden;
         position: relative;
       }
@@ -574,27 +648,27 @@ function renderPage(input: { title: string; description: string; body: string })
       .label {
         display: inline-flex;
         align-items: center;
-        min-height: 30px;
-        padding: 0 12px;
+        min-height: 26px;
+        padding: 0 10px;
         border-radius: 999px;
         background: rgba(15, 118, 110, 0.12);
         color: var(--teal);
-        font-size: 0.77rem;
+        font-size: 0.72rem;
         font-weight: 800;
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
 
       h1 {
-        margin: 18px 0 12px;
+        margin: 14px 0 10px;
         max-width: 12ch;
-        font-size: clamp(2.5rem, 5vw, 4.9rem);
-        line-height: 0.95;
+        font-size: clamp(1.95rem, 3.2vw, 3.2rem);
+        line-height: 1;
       }
 
       h2 {
         margin: 10px 0 0;
-        font-size: clamp(1.15rem, 2vw, 1.5rem);
+        font-size: clamp(1rem, 1.4vw, 1.25rem);
       }
 
       .lede,
@@ -619,9 +693,9 @@ function renderPage(input: { title: string; description: string; body: string })
 
       .button-row,
       .status-row {
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
-        margin-top: 22px;
+        margin-top: 18px;
       }
 
       .button,
@@ -634,11 +708,12 @@ function renderPage(input: { title: string; description: string; body: string })
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 48px;
-        padding: 0 18px;
+        min-height: 42px;
+        padding: 0 16px;
         border-radius: 999px;
         font-weight: 700;
         text-decoration: none;
+        font-size: 0.92rem;
       }
 
       .button:hover,
@@ -671,10 +746,11 @@ function renderPage(input: { title: string; description: string; body: string })
       .pill {
         display: inline-flex;
         align-items: center;
-        min-height: 36px;
-        padding: 0 14px;
+        min-height: 32px;
+        padding: 0 12px;
         border-radius: 999px;
         font-weight: 700;
+        font-size: 0.86rem;
       }
 
       .pill-teal {
@@ -705,7 +781,7 @@ function renderPage(input: { title: string; description: string; body: string })
       .callout,
       .status-card,
       .empty-state {
-        padding: 16px 18px;
+        padding: 14px 16px;
       }
 
       .code-line,
@@ -718,7 +794,7 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .token-row {
-        padding: 14px 16px;
+        padding: 12px 14px;
       }
 
       .token-row.emphasized {
@@ -726,41 +802,42 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .pair-code {
-        font-size: clamp(2rem, 4vw, 3rem);
+        font-size: clamp(1.5rem, 2.6vw, 2.2rem);
         letter-spacing: 0.18em;
       }
 
       .icon-button {
         border: 0;
         border-radius: 999px;
-        min-height: 38px;
-        padding: 0 14px;
+        min-height: 34px;
+        padding: 0 12px;
         background: rgba(17, 36, 62, 0.1);
         color: var(--navy-950);
         cursor: pointer;
         font-weight: 700;
+        font-size: 0.84rem;
       }
 
       .metrics {
-        gap: 16px;
+        gap: 12px;
         flex-wrap: wrap;
-        margin-top: 18px;
+        margin-top: 14px;
       }
 
       .metric {
         flex: 1 1 220px;
-        padding: 18px 20px;
+        padding: 16px 18px;
       }
 
       .metric strong {
         display: block;
-        margin-top: 12px;
-        font-size: 2rem;
+        margin-top: 10px;
+        font-size: 1.55rem;
       }
 
       .content-grid {
-        gap: 18px;
-        margin-top: 18px;
+        gap: 14px;
+        margin-top: 14px;
         flex-wrap: wrap;
         align-items: stretch;
       }
@@ -782,14 +859,14 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .tab-shell {
-        margin-top: 18px;
+        margin-top: 14px;
       }
 
       .tab-bar {
         display: flex;
-        gap: 10px;
+        gap: 8px;
         flex-wrap: wrap;
-        padding: 12px;
+        padding: 10px;
       }
 
       .tab-button {
@@ -798,12 +875,13 @@ function renderPage(input: { title: string; description: string; body: string })
         justify-content: center;
         border: 0;
         border-radius: 999px;
-        min-height: 44px;
-        padding: 0 16px;
+        min-height: 38px;
+        padding: 0 14px;
         background: rgba(17, 36, 62, 0.08);
         color: var(--navy-800);
         cursor: pointer;
         font-weight: 800;
+        font-size: 0.9rem;
       }
 
       .tab-button.active {
@@ -812,7 +890,7 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .tab-panel {
-        margin-top: 18px;
+        margin-top: 14px;
         min-height: clamp(320px, 44vh, 720px);
       }
 
@@ -821,7 +899,7 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .section {
-        padding: 22px;
+        padding: 18px;
         height: 100%;
       }
 
@@ -841,9 +919,9 @@ function renderPage(input: { title: string; description: string; body: string })
       .qr-box {
         display: grid;
         place-items: center;
-        margin: 18px 0 14px;
-        padding: 20px;
-        border-radius: 26px;
+        margin: 14px 0 12px;
+        padding: 16px;
+        border-radius: 22px;
         background: rgba(253, 248, 239, 0.95);
         border: 1px solid var(--line);
       }
@@ -853,10 +931,40 @@ function renderPage(input: { title: string; description: string; body: string })
         height: auto;
       }
 
-      .list-grid {
-        gap: 14px;
+      .inline-qr-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .qr-box-compact {
+        margin: 0;
+        padding: 8px;
+        min-width: 116px;
+      }
+
+      .qr-box-compact svg {
+        width: 104px;
+      }
+
+      .qr-box-large svg {
+        width: min(100%, 320px);
+      }
+
+      .qr-panel {
+        display: flex;
         flex-direction: column;
-        margin-top: 16px;
+      }
+
+      .list-grid {
+        gap: 12px;
+        flex-direction: column;
+        margin-top: 14px;
       }
 
       .list-grid.compact {
@@ -865,27 +973,27 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .list-card {
-        padding: 16px 18px;
+        padding: 14px 16px;
       }
 
       .list-card.chat-activity {
-        padding: 18px;
+        padding: 16px;
       }
 
       .list-card strong {
         display: block;
-        font-size: 1.05rem;
+        font-size: 0.98rem;
       }
 
       .message-stack {
         display: grid;
-        gap: 10px;
-        margin-top: 14px;
+        gap: 8px;
+        margin-top: 12px;
       }
 
       .message-preview {
-        padding: 12px 14px;
-        border-radius: 16px;
+        padding: 10px 12px;
+        border-radius: 14px;
         border: 1px solid var(--line);
         background: rgba(255, 255, 255, 0.78);
       }
@@ -901,16 +1009,17 @@ function renderPage(input: { title: string; description: string; body: string })
       .preview-label {
         display: inline-block;
         color: var(--navy-800);
-        font-size: 0.78rem;
+        font-size: 0.72rem;
         font-weight: 800;
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
 
       .preview-text {
-        margin: 8px 0 0;
+        margin: 6px 0 0;
         color: var(--text);
-        line-height: 1.55;
+        line-height: 1.45;
+        font-size: 0.92rem;
       }
 
       .preview-text.empty {
@@ -918,19 +1027,20 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .error-note {
-        margin-top: 12px;
-        padding: 10px 12px;
+        margin-top: 10px;
+        padding: 9px 10px;
         border-radius: 14px;
         background: rgba(217, 107, 28, 0.12);
         color: var(--orange);
         font-weight: 700;
+        font-size: 0.88rem;
       }
 
       .micro {
         display: inline-block;
-        margin-top: 8px;
+        margin-top: 6px;
         color: var(--muted);
-        font-size: 0.8rem;
+        font-size: 0.74rem;
         font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
       }
 
@@ -942,10 +1052,11 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       .steps {
-        margin: 14px 0 0;
+        margin: 12px 0 0;
         padding-left: 20px;
         color: var(--muted);
-        line-height: 1.75;
+        line-height: 1.6;
+        font-size: 0.94rem;
       }
 
       .gap-sm {
@@ -1003,7 +1114,8 @@ function renderPage(input: { title: string; description: string; body: string })
         .code-line,
         .token-row,
         .section-head,
-        .status-line {
+        .status-line,
+        .inline-qr-card {
           align-items: flex-start;
           flex-direction: column;
         }
@@ -1062,13 +1174,28 @@ function renderPage(input: { title: string; description: string; body: string })
       tabs.forEach((button) => {
         button.addEventListener("click", () => activateTab(button.getAttribute("data-tab-target")));
       });
+      document.querySelectorAll("[data-tab-open]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          const targetId = link.getAttribute("data-tab-open");
+          if (!targetId) return;
+          activateTab(targetId);
+          window.location.hash = targetId;
+        });
+      });
+      window.addEventListener("hashchange", () => {
+        const targetId = window.location.hash.replace(/^#/, "");
+        if (targetId) {
+          activateTab(targetId);
+        }
+      });
       const initialTab =
         window.location.hash.replace(/^#/, "") ||
         (() => {
           try {
-            return localStorage.getItem(storageKey) || "overview";
+            return localStorage.getItem(storageKey) || "operator";
           } catch {
-            return "overview";
+            return "operator";
           }
         })();
       activateTab(initialTab);
@@ -1083,7 +1210,6 @@ function renderPage(input: { title: string; description: string; body: string })
           }
         });
       });
-      setTimeout(() => window.location.reload(), 10000);
     </script>
   </body>
 </html>`;
@@ -1161,6 +1287,16 @@ function truncatePreview(value: string, maxLength = 220): string {
   return `${value.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+function renderAuditCard(event: DesktopOverviewResponse["overview"]["auditEvents"][number]): string {
+  return `
+    <div class="list-card">
+      <strong>${escapeHtml(event.type.replace(/_/g, " "))}</strong>
+      <p>${escapeHtml(event.detail ?? "No extra detail recorded.")}</p>
+      <span class="micro">${escapeHtml(timeAgo(event.createdAt))}</span>
+    </div>
+  `;
+}
+
 function resolvePublicBaseUrl(req: IncomingMessage, overview: GatewayOverview): string {
   const suggestedUrl = overview.hostStatus?.tailscale.suggestedUrl;
   if (suggestedUrl) {
@@ -1179,6 +1315,61 @@ function humanizeAuth(value: string): string {
     return "Codex needs attention";
   }
   return "Codex login required";
+}
+
+function humanizeAvailability(value: string): string {
+  switch (value) {
+    case "codex_unavailable":
+      return "Codex unavailable";
+    case "offline":
+      return "Desktop offline";
+    case "ready":
+      return "Ready";
+    case "reconnecting":
+      return "Reconnecting";
+    case "repair_needed":
+      return "Repair needed";
+    case "tailscale_unavailable":
+      return "Tailscale unavailable";
+    default:
+      return "Needs attention";
+  }
+}
+
+function humanizeRepairState(value: string): string {
+  switch (value) {
+    case "repair_required":
+      return "Repair required";
+    case "reconnecting":
+      return "Reconnecting";
+    case "repaired":
+      return "Repaired";
+    default:
+      return "Healthy";
+  }
+}
+
+function humanizeRunState(value: string): string {
+  switch (value) {
+    case "failed":
+      return "Failed";
+    case "running":
+      return "Running";
+    case "sending":
+      return "Sending";
+    case "speaking":
+      return "Speaking";
+    case "stopping":
+      return "Stopping";
+    case "review":
+      return "Review";
+    case "listening":
+      return "Listening";
+    case "completed":
+      return "Completed";
+    default:
+      return "Ready";
+  }
 }
 
 function humanizeSessionStatus(value: ChatSession["status"]): string {

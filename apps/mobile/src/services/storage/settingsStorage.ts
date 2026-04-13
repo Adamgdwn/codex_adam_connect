@@ -1,12 +1,15 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { ResponseStyle } from "@adam-connect/shared";
 
 const SETTINGS_KEY = "adam-connect.settings";
 
 export interface StoredSettings {
   baseUrl: string;
   deviceName: string;
+  currentDeviceId?: string | null;
   autoSpeak: boolean;
   autoSendVoice: boolean;
+  responseStyle?: ResponseStyle;
 }
 
 export async function loadSettings(): Promise<StoredSettings | null> {

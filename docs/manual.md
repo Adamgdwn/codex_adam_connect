@@ -8,8 +8,8 @@ The near-term product goal is simple: the phone should feel like a persistent re
 
 ### Completed In This Checkpoint
 
-- the supported desktop GUI is the browser dashboard opened by `npm run launch`
-- the dashboard now includes pairing, host health, Tailscale status, recent sessions, recent devices, QR onboarding, and Android APK download links
+- the supported desktop GUI is now the Electron shell opened by `npm run launch`
+- the shell-facing desktop surface now includes `Operator`, `Activity`, `Devices`, `Workspaces`, and `Settings`
 - Linux users can install a desktop-menu launcher with `npm run app:desktop:install-launcher`
 
 ### Next Up
@@ -18,7 +18,7 @@ The near-term product goal is simple: the phone should feel like a persistent re
 - tighten pairing recovery, voice send/reply behavior, and shared phone/desktop status messaging
 - improve chat readability and session management without losing the low-friction operator flow
 - validate iOS on a real build machine
-- decide whether to ship the native Electron shell scaffold or keep the browser dashboard as the long-term desktop surface
+- keep tightening the native shell and the phone-side operator loop before widening scope
 
 ## Before You Start
 
@@ -46,24 +46,24 @@ npm run build:android-release
 
 ```mermaid
 flowchart TD
-    A[Desktop launches Adam Connect] --> B[Desktop dashboard opens in browser]
+    A[Desktop launches Adam Connect] --> B[Electron shell opens]
     B --> C[Gateway publishes install page and pairing code]
     C --> D[Phone opens install page over Tailscale]
     D --> E[User installs Android APK]
     E --> F[Phone app opens]
     F --> G[User enters desktop URL and pairing code]
-    G --> H[Gateway returns long-lived device token]
-    H --> I[User creates a chat from an approved desktop root]
+    G --> H[Gateway returns a saved device link]
+    H --> I[User creates or resumes a chat]
     I --> J[Phone sends text or push-to-talk transcript]
-    J --> K[Desktop host forwards turn to local Codex]
-    K --> L[Assistant response streams back to phone]
+    J --> K[Desktop host forwards the turn to local Codex]
+    K --> L[Assistant response streams back to phone and desktop]
 ```
 
 ## Install On Android
 
 1. On the desktop, run `npm run launch`.
-2. The desktop dashboard opens in your browser automatically.
-3. Open the phone install page from that dashboard, or scan the QR code.
+2. The native desktop shell opens automatically.
+3. Open `Phone Setup` in the shell, or use the fallback browser install page, then scan the QR code or open the install link on the phone.
 4. On the phone, visit the Tailscale install page URL shown there if you did not scan.
 5. Tap `Download Android APK`.
    The dashboard should serve a release APK when one exists.
@@ -88,7 +88,7 @@ Typical desktop URLs are:
 
 Notes:
 - The QR code is optional. The real pairing inputs are the desktop URL and pairing code.
-- After pairing, the phone stores a long-lived device token.
+- After pairing, the phone stores a saved device link that should survive normal day-to-day use.
 - That means normal day-to-day use should not require repairing unless you reinstall the app, clear app storage, or move to a new phone.
 - The pairing code now stays stable across normal desktop restarts, so remote recovery is less fragile.
 - Reconnecting to an existing paired desktop should be treated as recovery, not as a full new setup flow.
@@ -101,21 +101,23 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 ## Start Your First Chat
 
 1. Open the `Chats` tab.
-2. Pick an approved workspace root.
-3. Tap `Start Chat`, or just use the default `Operator` chat.
+2. Use the project wizard to pick an approved workspace root, name the project, describe the goal, and choose the reply style you want.
+3. Tap `Start Project Chat`, or just use the default `Operator` chat for quick turns.
 4. Open the chat and type a prompt, or use `Talk To Codex`.
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
 For everyday use, prefer the default `Operator` chat unless you intentionally want a separate named project thread.
 The `Operator` chat is pinned to the top of the chat list so quick remote turns stay easy to find.
+The reply-style control in the wizard and chat screen lets you ask for `Natural`, `Executive`, `Technical`, or `Concise` responses without changing the saved conversation thread.
+The chat screen is now intentionally tighter, with a compact top bar, a few small controls, and most of the screen reserved for the conversation itself.
 
 ## What The Screens Mean
 
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
 - `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
-- `Chats`: create or reopen persistent chat sessions tied to approved desktop roots.
-- `Chat`: send messages, use voice transcription, watch streamed replies, and stop active runs.
+- `Chats`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
+- `Chat`: send messages, switch reply styles, use voice transcription, watch streamed replies, and stop active runs.
 
 The phone and desktop should present the same broad picture of what is happening: online/offline state, run status, recent recovery needs, and whether Codex is ready.
 The phone chat view now also shows clearer message roles, timestamps, and code blocks so longer replies are easier to scan.
@@ -124,6 +126,7 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 
 - If the phone cannot reach the desktop, confirm both devices are connected in Tailscale and use the Tailscale hostname or `100.x.x.x` address.
 - If the app says Codex is logged out, run `codex login --device-auth` on the desktop.
+- If Android background updates stay unavailable, confirm `google-services.json` is present in `apps/mobile/android/app/` and the desktop `.env` includes `FCM_SERVER_KEY`.
 - If the Android APK download works but installation is blocked, allow installs from the browser you used to download it.
 - If the phone pairs but replies do not appear, check the terminal running `npm run launch`.
 - If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
@@ -131,6 +134,7 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - If a voice turn transcribes but does not send, check whether `Auto-send voice turns` is enabled on the `Host` screen.
 - If `Auto-send voice turns` is enabled but the app pauses instead of sending, Adam Connect likely decided the transcript was long or risky enough to require review first.
 - If the app says the desktop link needs repair, use the saved desktop URL and current pairing code instead of disconnecting and re-entering everything manually.
+- If a chat says it is busy when nothing appears to be happening, pull to refresh once and then use `Stop`; the latest desktop host now recovers stale runs much more reliably than before.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use

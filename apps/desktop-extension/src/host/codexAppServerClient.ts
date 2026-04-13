@@ -85,7 +85,7 @@ export class CodexAppServerClient extends EventEmitter {
     }
   }
 
-  async request<T>(method: string, params?: unknown): Promise<T> {
+  async request<T>(method: string, params?: unknown, timeoutMs = 15_000): Promise<T> {
     const socket = this.requireSocket();
     const id = ++this.requestId;
     const payload: JsonRpcRequest = {
@@ -96,10 +96,27 @@ export class CodexAppServerClient extends EventEmitter {
     };
 
     return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Codex app-server request timed out: ${method}`));
+      }, timeoutMs);
+
       this.pending.set(id, { resolve, reject });
       socket.send(JSON.stringify(payload), (error) => {
         if (error) {
+          clearTimeout(timeout);
           this.pending.delete(id);
+          reject(error);
+        }
+      });
+
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
           reject(error);
         }
       });

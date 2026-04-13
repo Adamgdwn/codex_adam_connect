@@ -8,14 +8,19 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 dotenv.config({ path: path.resolve(repoRoot, ".env") });
 
 const shouldOpenBrowser = !process.argv.includes("--no-open");
+const shouldUseShell = shouldOpenBrowser && hasGuiSession();
 const gatewayPort = Number(process.env.GATEWAY_PORT ?? 43111);
 const dashboardUrl = `http://127.0.0.1:${gatewayPort}/`;
+const gatewayDataDir = path.join(repoRoot, "apps/gateway/.local-data/gateway");
+const desktopDataDir = path.join(repoRoot, "apps/desktop-extension/.local-data/desktop");
 
 const sharedEnv = {
   ...process.env,
   DESKTOP_APPROVED_ROOTS: process.env.DESKTOP_APPROVED_ROOTS?.trim() || repoRoot,
   DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Adam Connect Desktop",
-  DESKTOP_GATEWAY_URL: process.env.DESKTOP_GATEWAY_URL?.trim() || `http://127.0.0.1:${gatewayPort}`
+  DESKTOP_GATEWAY_URL: process.env.DESKTOP_GATEWAY_URL?.trim() || `http://127.0.0.1:${gatewayPort}`,
+  DESKTOP_DATA_DIR: process.env.DESKTOP_DATA_DIR?.trim() || desktopDataDir,
+  GATEWAY_DATA_DIR: process.env.GATEWAY_DATA_DIR?.trim() || gatewayDataDir
 };
 
 process.stdout.write("Launching Adam Connect desktop...\n");
@@ -122,6 +127,13 @@ async function openBrowser(url) {
 }
 
 async function start() {
+  if (shouldUseShell) {
+    process.stdout.write("Launching Adam Connect Desktop shell...\n");
+    const shellProcess = spawnNpmProcess("shell", ["run", "app:desktop:shell"]);
+    children.push(shellProcess);
+    return;
+  }
+
   const alreadyRunning = await waitForDashboard(dashboardUrl, 1_500);
   if (alreadyRunning) {
     process.stdout.write(`Adam Connect is already running at ${dashboardUrl}\n`);
@@ -175,3 +187,7 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 void start();
+
+function hasGuiSession() {
+  return process.platform === "darwin" || process.platform === "win32" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+}

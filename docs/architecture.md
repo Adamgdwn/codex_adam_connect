@@ -2,7 +2,7 @@
 
 ## Summary
 
-Adam Connect is a local-first remote-control companion for Codex. A paired mobile client talks to a local gateway, and the desktop host bridges those chat requests into the local Codex app-server. The current supported desktop surface is the browser dashboard opened by `npm run launch`.
+Adam Connect is a local-first remote-control companion for Codex. A paired mobile client talks to a local gateway, and the desktop host bridges those chat requests into the local Codex app-server. The current supported desktop surface is the Electron shell opened by `npm run launch`.
 
 The current near-term architecture priority is the `Operator loop`: keep one persistent, low-friction phone-to-desktop path healthy before adding broader product surface area.
 
@@ -11,8 +11,8 @@ The current near-term architecture priority is the `Operator loop`: keep one per
 - `apps/mobile`: pairing, host status, chat sessions, text input, push-to-talk, optional TTS
 - `apps/gateway`: device pairing, token auth, session/message persistence, realtime websocket fan-out
 - `apps/desktop-extension`: host registration, Codex auth checks, Codex app-server supervision, message execution
-- browser dashboard: desktop-facing GUI served from the gateway root route with install/onboarding and live host state
-- `apps/desktop-shell`: native-shell scaffold under active evaluation, not yet the primary supported launch path
+- browser dashboard: fallback install/recovery/admin surface served from the gateway root route
+- `apps/desktop-shell`: supported native-shell entrypoint for the desktop operator console
 
 ## Data Flow
 
@@ -38,7 +38,7 @@ The current near-term architecture priority is the `Operator loop`: keep one per
 - the phone never stores an OpenAI API key
 - local Codex login is the primary auth dependency for assistant turns
 - approved roots constrain chat session workspaces
-- the browser dashboard remains the supported desktop GUI until the native-shell runtime path is proven
+- the Electron shell is the supported desktop GUI and the browser dashboard remains a fallback install/recovery surface
 - stale device-token recovery should prefer repair of the existing phone/desktop link rather than a full disconnect-first flow
 - voice auto-send must remain explicitly user-controlled and should pause for review on risky transcripts
 

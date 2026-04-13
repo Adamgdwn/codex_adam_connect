@@ -3,8 +3,14 @@ import type {
   ChatSession,
   CreateSessionRequest,
   HostStatus,
+  NotificationEvent,
   PairingCompleteResponse,
+  PairedDevice,
   PostMessageRequest,
+  RegisterPushTokenRequest,
+  RealtimeTicketResponse,
+  RenameDeviceRequest,
+  UpdateNotificationPrefsRequest,
   UpdateSessionRequest
 } from "@adam-connect/shared";
 
@@ -22,6 +28,10 @@ export class ApiClient {
 
   listSessions(token: string, baseUrl: string): Promise<ChatSession[]> {
     return this.request("GET", `${baseUrl}/sessions`, token);
+  }
+
+  listDevices(token: string, baseUrl: string): Promise<PairedDevice[]> {
+    return this.request("GET", `${baseUrl}/devices`, token);
   }
 
   createSession(token: string, baseUrl: string, input: CreateSessionRequest): Promise<ChatSession> {
@@ -46,6 +56,40 @@ export class ApiClient {
 
   stopSession(token: string, baseUrl: string, sessionId: string): Promise<ChatSession> {
     return this.request("POST", `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/stop`, token);
+  }
+
+  createRealtimeTicket(token: string, baseUrl: string): Promise<RealtimeTicketResponse> {
+    return this.request("POST", `${baseUrl}/realtime/ticket`, token);
+  }
+
+  renameDevice(token: string, baseUrl: string, deviceId: string, input: RenameDeviceRequest): Promise<PairedDevice> {
+    return this.request("PATCH", `${baseUrl}/devices/${encodeURIComponent(deviceId)}`, token, input);
+  }
+
+  revokeDevice(token: string, baseUrl: string, deviceId: string): Promise<PairedDevice> {
+    return this.request("POST", `${baseUrl}/devices/${encodeURIComponent(deviceId)}/revoke`, token);
+  }
+
+  registerPushToken(
+    token: string,
+    baseUrl: string,
+    deviceId: string,
+    input: RegisterPushTokenRequest
+  ): Promise<PairedDevice> {
+    return this.request("POST", `${baseUrl}/devices/${encodeURIComponent(deviceId)}/push-token`, token, input);
+  }
+
+  updateNotificationPrefs(
+    token: string,
+    baseUrl: string,
+    deviceId: string,
+    input: UpdateNotificationPrefsRequest
+  ): Promise<PairedDevice> {
+    return this.request("POST", `${baseUrl}/devices/${encodeURIComponent(deviceId)}/notification-prefs`, token, input);
+  }
+
+  sendTestNotification(token: string, baseUrl: string, deviceId: string, event: NotificationEvent): Promise<{ ok: true; deviceId: string }> {
+    return this.request("POST", `${baseUrl}/devices/${encodeURIComponent(deviceId)}/test-notification`, token, { event });
   }
 
   private async request<T>(method: string, url: string, token?: string, body?: unknown): Promise<T> {

@@ -5,6 +5,22 @@ export const chatSessionStatusSchema = z.enum(["idle", "queued", "running", "sto
 export const chatMessageRoleSchema = z.enum(["user", "assistant", "system"]);
 export const chatMessageStatusSchema = z.enum(["pending", "streaming", "completed", "failed", "interrupted"]);
 export const streamEventTypeSchema = z.enum(["host_status", "session_upsert", "message_upsert"]);
+export const hostAvailabilitySchema = z.enum([
+  "ready",
+  "offline",
+  "reconnecting",
+  "repair_needed",
+  "codex_unavailable",
+  "tailscale_unavailable",
+  "needs_attention"
+]);
+export const repairStateSchema = z.enum(["healthy", "reconnecting", "repair_required", "repaired"]);
+export const runStateSchema = z.enum(["ready", "listening", "review", "sending", "running", "stopping", "speaking", "completed", "failed"]);
+export const sessionKindSchema = z.enum(["operator", "project", "admin", "build", "notes"]);
+export const responseStyleSchema = z.enum(["natural", "executive", "technical", "concise"]);
+export const notificationEventSchema = z.enum(["run_complete", "run_failed", "repair_needed", "approval_needed"]);
+export const inputModeSchema = z.enum(["text", "voice", "voice_polished"]);
+export const transportSecuritySchema = z.enum(["secure", "insecure", "unknown"]);
 
 export const hostAuthStateSchema = z.object({
   status: hostAuthStatusSchema,
@@ -18,8 +34,16 @@ export const tailscaleStatusSchema = z.object({
   dnsName: z.string().nullable(),
   ipv4: z.string().nullable(),
   suggestedUrl: z.string().nullable(),
+  transportSecurity: transportSecuritySchema,
   installUrl: z.string().url(),
   loginUrl: z.string().url()
+});
+
+export const notificationPrefsSchema = z.object({
+  run_complete: z.boolean(),
+  run_failed: z.boolean(),
+  repair_needed: z.boolean(),
+  approval_needed: z.boolean()
 });
 
 export const registeredHostSchema = z.object({
@@ -37,6 +61,12 @@ export const pairedDeviceSchema = z.object({
   id: z.string().min(1),
   hostId: z.string().min(1),
   deviceName: z.string().min(1),
+  pushToken: z.string().nullable(),
+  notificationPrefs: notificationPrefsSchema,
+  revokedAt: z.string().datetime().nullable(),
+  lastNotificationAt: z.string().datetime().nullable(),
+  repairCount: z.number().int().nonnegative(),
+  repairedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   lastSeenAt: z.string().datetime()
 });
@@ -46,12 +76,17 @@ export const chatSessionSchema = z.object({
   hostId: z.string().min(1),
   deviceId: z.string().min(1),
   title: z.string().min(1),
+  kind: sessionKindSchema,
+  pinned: z.boolean(),
+  archived: z.boolean(),
   rootPath: z.string().min(1),
   threadId: z.string().nullable(),
   status: chatSessionStatusSchema,
   activeTurnId: z.string().nullable(),
   stopRequested: z.boolean(),
   lastError: z.string().nullable(),
+  lastPreview: z.string().nullable(),
+  lastActivityAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -63,6 +98,9 @@ export const chatMessageSchema = z.object({
   content: z.string(),
   status: chatMessageStatusSchema,
   errorMessage: z.string().nullable(),
+  inputMode: inputModeSchema.nullable().optional(),
+  responseStyle: responseStyleSchema.nullable().optional(),
+  transcriptPolished: z.boolean().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });
@@ -78,8 +116,21 @@ export const hostStatusSchema = z.object({
   host: registeredHostSchema,
   auth: hostAuthStateSchema,
   tailscale: tailscaleStatusSchema,
+  availability: hostAvailabilitySchema,
+  repairState: repairStateSchema,
+  runState: runStateSchema,
   activeSessionCount: z.number().int().nonnegative(),
   pairedDeviceCount: z.number().int().nonnegative()
+});
+
+export const auditEventSchema = z.object({
+  id: z.string().min(1),
+  hostId: z.string().min(1),
+  deviceId: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  type: z.string().min(1),
+  detail: z.string().nullable(),
+  createdAt: z.string().datetime()
 });
 
 export const gatewayOverviewSchema = z.object({
@@ -87,7 +138,8 @@ export const gatewayOverviewSchema = z.object({
   lastSeenDevice: pairedDeviceSchema.nullable(),
   recentDevices: z.array(pairedDeviceSchema),
   recentSessions: z.array(chatSessionSchema),
-  recentSessionActivity: z.array(recentSessionActivitySchema)
+  recentSessionActivity: z.array(recentSessionActivitySchema),
+  auditEvents: z.array(auditEventSchema)
 });
 
 export const desktopOverviewResponseSchema = z.object({
@@ -130,7 +182,9 @@ export const pairingCompleteResponseSchema = z.object({
 
 export const createSessionRequestSchema = z.object({
   rootPath: z.string().min(1).optional(),
-  title: z.string().min(1).optional()
+  title: z.string().min(1).optional(),
+  kind: sessionKindSchema.optional(),
+  starterPrompt: z.string().min(1).max(8000).optional()
 });
 
 export const updateSessionRequestSchema = z.object({
@@ -138,7 +192,10 @@ export const updateSessionRequestSchema = z.object({
 });
 
 export const postMessageRequestSchema = z.object({
-  text: z.string().min(1).max(20000)
+  text: z.string().min(1).max(20000),
+  inputMode: inputModeSchema.optional(),
+  responseStyle: responseStyleSchema.optional(),
+  transcriptPolished: z.boolean().optional()
 });
 
 export const hostHeartbeatRequestSchema = z.object({
@@ -213,19 +270,48 @@ export const streamEventSchema = z.discriminatedUnion("type", [
   })
 ]);
 
+export const realtimeTicketResponseSchema = z.object({
+  ticket: z.string().min(10),
+  expiresAt: z.string().datetime()
+});
+
+export const renameDeviceRequestSchema = z.object({
+  deviceName: z.string().min(1).max(120)
+});
+
+export const registerPushTokenRequestSchema = z.object({
+  pushToken: z.string().min(1)
+});
+
+export const updateNotificationPrefsRequestSchema = notificationPrefsSchema;
+
+export const sendTestNotificationRequestSchema = z.object({
+  event: notificationEventSchema
+});
+
 export type HostAuthStatus = z.infer<typeof hostAuthStatusSchema>;
 export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
 export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
 export type ChatMessageStatus = z.infer<typeof chatMessageStatusSchema>;
 export type StreamEventType = z.infer<typeof streamEventTypeSchema>;
+export type HostAvailability = z.infer<typeof hostAvailabilitySchema>;
+export type RepairState = z.infer<typeof repairStateSchema>;
+export type RunState = z.infer<typeof runStateSchema>;
+export type SessionKind = z.infer<typeof sessionKindSchema>;
+export type ResponseStyle = z.infer<typeof responseStyleSchema>;
+export type NotificationEvent = z.infer<typeof notificationEventSchema>;
+export type InputMode = z.infer<typeof inputModeSchema>;
+export type TransportSecurity = z.infer<typeof transportSecuritySchema>;
 export type HostAuthState = z.infer<typeof hostAuthStateSchema>;
 export type TailscaleStatus = z.infer<typeof tailscaleStatusSchema>;
+export type NotificationPrefs = z.infer<typeof notificationPrefsSchema>;
 export type RegisteredHost = z.infer<typeof registeredHostSchema>;
 export type PairedDevice = z.infer<typeof pairedDeviceSchema>;
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type RecentSessionActivity = z.infer<typeof recentSessionActivitySchema>;
 export type HostStatus = z.infer<typeof hostStatusSchema>;
+export type AuditEvent = z.infer<typeof auditEventSchema>;
 export type GatewayOverview = z.infer<typeof gatewayOverviewSchema>;
 export type DesktopOverviewResponse = z.infer<typeof desktopOverviewResponseSchema>;
 export type RegisterHostRequest = z.infer<typeof registerHostRequestSchema>;
@@ -245,3 +331,8 @@ export type HostCompleteTurnRequest = z.infer<typeof hostCompleteTurnRequestSche
 export type HostFailTurnRequest = z.infer<typeof hostFailTurnRequestSchema>;
 export type HostInterruptTurnRequest = z.infer<typeof hostInterruptTurnRequestSchema>;
 export type StreamEvent = z.infer<typeof streamEventSchema>;
+export type RealtimeTicketResponse = z.infer<typeof realtimeTicketResponseSchema>;
+export type RenameDeviceRequest = z.infer<typeof renameDeviceRequestSchema>;
+export type RegisterPushTokenRequest = z.infer<typeof registerPushTokenRequestSchema>;
+export type UpdateNotificationPrefsRequest = z.infer<typeof updateNotificationPrefsRequestSchema>;
+export type SendTestNotificationRequest = z.infer<typeof sendTestNotificationRequestSchema>;
