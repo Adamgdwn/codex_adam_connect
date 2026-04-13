@@ -3,6 +3,7 @@ import { Text, TextInput, View } from "react-native";
 import type { ChatMessage } from "@adam-connect/shared";
 import { formatMessageTimestamp, humanizeMessageRole, humanizeMessageStatus, splitMessageContent } from "../utils/operatorConsole";
 import { styles } from "./mobileStyles";
+import { humanizeVoiceSessionPhase, type VoiceSessionPhase } from "../services/voice/voiceSessionMachine";
 
 export function StatusChip(props: { label: string; tone: "teal" | "orange" }): React.JSX.Element {
   return (
@@ -44,6 +45,47 @@ export function Banner(props: { text: string; tone: "error" | "info" }): React.J
     <View style={[styles.banner, props.tone === "error" ? styles.errorBanner : styles.infoBanner]}>
       <Text style={[styles.bannerLabel, props.tone === "error" ? styles.errorBannerLabel : styles.infoBannerLabel]}>
         {props.text}
+      </Text>
+    </View>
+  );
+}
+
+export function VoiceSessionPanel(props: {
+  active: boolean;
+  phase: VoiceSessionPhase;
+  liveTranscript: string;
+  assistantDraft: string | null;
+  audioLevel: number;
+  telemetry: {
+    turnsStarted: number;
+    turnsCompleted: number;
+    interruptions: number;
+    reconnects: number;
+    lastRoundTripMs: number | null;
+  };
+}): React.JSX.Element {
+  const tone = props.phase === "error" || props.phase === "interrupted" || props.phase === "reconnecting" ? "orange" : "teal";
+  const meterWidth = `${Math.max(4, Math.min(100, ((props.audioLevel + 2) / 12) * 100))}%` as `${number}%`;
+  const preview = props.liveTranscript || props.assistantDraft || (props.active ? "Waiting for speech..." : "Start voice to keep the conversation loop open.");
+  const label = props.liveTranscript ? "Live transcript" : props.assistantDraft ? "Assistant preview" : "Voice loop";
+
+  return (
+    <View style={[styles.card, styles.voiceSessionCard]}>
+      <View style={styles.voiceSessionHeader}>
+        <View style={styles.voiceSessionCopy}>
+          <Text style={styles.sectionTitle}>Voice Loop</Text>
+          <Text style={styles.helperText}>Natural turn-taking with live transcript and spoken reply.</Text>
+        </View>
+        <StatusChip label={humanizeVoiceSessionPhase(props.phase)} tone={tone} />
+      </View>
+      <View style={styles.voiceMeterTrack}>
+        <View style={[styles.voiceMeterFill, { width: meterWidth }]} />
+      </View>
+      <Text style={styles.voicePreviewLabel}>{label}</Text>
+      <Text style={styles.supportingText}>{preview}</Text>
+      <Text style={styles.voiceMetrics}>
+        Turns {props.telemetry.turnsStarted}/{props.telemetry.turnsCompleted} · Interruptions {props.telemetry.interruptions} · Reconnects {props.telemetry.reconnects}
+        {props.telemetry.lastRoundTripMs !== null ? ` · Last RTT ${(props.telemetry.lastRoundTripMs / 1000).toFixed(1)}s` : ""}
       </Text>
     </View>
   );

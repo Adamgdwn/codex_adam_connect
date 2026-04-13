@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform, Pressable, RefreshControl, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { PROJECT_TEMPLATES, humanizeResponseStyle } from "@adam-connect/shared";
 import type { AppState } from "../store/appStore";
-import { findSendTargetSession, findStopTargetSession, formatMessageTimestamp, isOperatorSession, isSessionBusy } from "../utils/operatorConsole";
-import { Banner, LabeledInput, MessageBubble, StatusChip } from "./components";
+import { findManualStopTargetSession, findSendTargetSession, findStopTargetSession, formatMessageTimestamp, isOperatorSession, isSessionBusy } from "../utils/operatorConsole";
+import { Banner, LabeledInput, MessageBubble, StatusChip, VoiceSessionPanel } from "./components";
 import { styles } from "./mobileStyles";
 
 const keyboardDismissMode: "interactive" | "on-drag" = Platform.OS === "ios" ? "interactive" : "on-drag";
@@ -185,6 +185,11 @@ export function HostScreen(props: {
         <View style={styles.rowBetween}>
           <Text style={styles.metric}>Auto-send voice turns</Text>
           <Switch value={store.autoSendVoice} onValueChange={() => store.toggleAutoSendVoice().catch((error) => console.warn(error))} />
+        </View>
+        <View style={styles.actions}>
+          <Pressable style={styles.secondaryButton} onPress={() => store.testAssistantVoice().catch((error) => console.warn(error))}>
+            <Text style={styles.secondaryLabel}>Test Spoken Reply</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -445,6 +450,7 @@ export function ChatScreen(props: {
   const selectedSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? null;
   const sendTargetSession = findSendTargetSession(store.selectedSessionId, store.sessions);
   const stopTargetSession = findStopTargetSession(store.selectedSessionId, store.sessions);
+  const manualStopTargetSession = findManualStopTargetSession(store.selectedSessionId, store.sessions);
   const hasSelectedSession = Boolean(store.selectedSessionId);
   const hasFallbackSession = store.sessions.length > 0;
   const canCreateFromApprovedRoot = Boolean(store.newSessionRootPath || store.hostStatus?.host.approvedRoots[0]);
@@ -456,6 +462,9 @@ export function ChatScreen(props: {
   );
   const messages = store.selectedSessionId ? store.messagesBySession[store.selectedSessionId] ?? [] : [];
   const busy = isSessionBusy(stopTargetSession);
+  const canRequestStop = Boolean(manualStopTargetSession || store.voiceSessionActive || store.voiceAssistantDraft);
+  const lastMessage = messages[messages.length - 1] ?? null;
+  const lastMessageSnapshot = lastMessage ? `${lastMessage.id}:${lastMessage.status}:${lastMessage.updatedAt}:${lastMessage.content.length}` : "empty";
   const scrollRef = useRef<ScrollView | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const showChatChrome = !selectedSession || Boolean(selectedSession.lastError) || (!hasSelectedSession && hasFallbackSession);
@@ -463,6 +472,8 @@ export function ChatScreen(props: {
     ? "Start or resume a chat before sending your first prompt."
     : !store.voiceAvailable
       ? "Voice needs the phone's speech recognition service. Tap the top-right mic button if Android is missing it."
+      : store.voiceSessionActive
+        ? "Voice loop is active. Speak naturally, interrupt when needed, or type if you want to steer the session."
       : null;
 
   useEffect(() => {
@@ -473,7 +484,7 @@ export function ChatScreen(props: {
       scrollRef.current?.scrollToEnd({ animated: true });
     }, 50);
     return () => clearTimeout(timer);
-  }, [messages.length, selectedSession?.id, stickToBottom]);
+  }, [lastMessageSnapshot, selectedSession?.id, stickToBottom]);
 
   return (
     <View style={styles.chatScreen}>
@@ -487,6 +498,11 @@ export function ChatScreen(props: {
           const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
           const distanceFromBottom = contentSize.height - (layoutMeasurement.height + contentOffset.y);
           setStickToBottom(distanceFromBottom < 140);
+        }}
+        onContentSizeChange={() => {
+          if (stickToBottom) {
+            scrollRef.current?.scrollToEnd({ animated: true });
+          }
         }}
         scrollEventThrottle={16}
       >
@@ -520,6 +536,15 @@ export function ChatScreen(props: {
           </View>
         ) : null}
 
+        <VoiceSessionPanel
+          active={store.voiceSessionActive}
+          phase={store.voiceSessionPhase}
+          liveTranscript={store.liveTranscript}
+          assistantDraft={store.voiceAssistantDraft}
+          audioLevel={store.voiceAudioLevel}
+          telemetry={store.voiceTelemetry}
+        />
+
         <View style={styles.messages}>
           {messages.length > 0 ? messages.map((item) => <MessageBubble key={item.id} message={item} />) : <Text style={styles.metric}>Open a chat to see message history.</Text>}
         </View>
@@ -537,9 +562,9 @@ export function ChatScreen(props: {
         <View style={[styles.actions, styles.chatComposerActions]}>
           <Pressable
             testID="chat-stop-button"
-            style={[styles.secondaryButton, styles.chatComposerActionButton, !busy ? styles.disabledButton : null]}
+            style={[styles.secondaryButton, styles.chatComposerActionButton, !canRequestStop ? styles.disabledButton : null]}
             onPress={() => store.stopSession().catch((error) => console.warn(error))}
-            disabled={!busy}
+            disabled={!canRequestStop}
           >
             <Text style={styles.secondaryLabel}>Stop</Text>
           </Pressable>
@@ -552,6 +577,8 @@ export function ChatScreen(props: {
             <Text style={styles.primaryLabel}>Send</Text>
           </Pressable>
         </View>
+        {busy ? <Text style={styles.helperText}>Stop targets the currently busy chat, even if you are viewing a different thread.</Text> : null}
+        {!busy && canRequestStop ? <Text style={styles.helperText}>Stop can also be used as a recovery action if this chat feels stuck.</Text> : null}
         {chatHelperText ? <Text style={styles.helperText}>{chatHelperText}</Text> : null}
       </View>
     </View>

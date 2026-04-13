@@ -45,6 +45,20 @@ const mockStore = {
   pushAvailable: false,
   pushSyncing: false,
   listening: false,
+  voiceSessionActive: false,
+  voiceSessionPhase: "idle",
+  liveTranscript: "",
+  voiceAudioLevel: -2,
+  voiceAssistantDraft: null,
+  voiceTelemetry: {
+    turnsStarted: 0,
+    turnsCompleted: 0,
+    interruptions: 0,
+    reconnects: 0,
+    lastHeardAt: null,
+    lastAssistantStartedAt: null,
+    lastRoundTripMs: null
+  },
   lastSpokenMessageId: null,
   notice: null,
   error: null,
@@ -66,6 +80,7 @@ const mockStore = {
   revokeDevice: jest.fn(async () => undefined),
   toggleAutoSpeak: jest.fn(async () => undefined),
   toggleAutoSendVoice: jest.fn(async () => undefined),
+  testAssistantVoice: jest.fn(async () => undefined),
   toggleListening: jest.fn(async () => undefined),
   setResponseStyle: jest.fn(async () => undefined),
   setRenameDraft: jest.fn(),
@@ -101,9 +116,9 @@ describe("refresh affordances", () => {
     let labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
 
     expect(labels).not.toContain("Refresh");
-    expect(labels).toContain("Talk");
+    expect(labels).toContain("Voice");
     expect(labels).toContain("⚙");
-    expect(labels).toContain("Codex ready");
+    expect(labels.some((label) => label.includes("Codex ready"))).toBe(true);
     expect(mockStore.bootstrap).toHaveBeenCalled();
 
     const controlsToggle = tree!.root.findByProps({ testID: "controls-toggle" });
@@ -121,6 +136,24 @@ describe("refresh affordances", () => {
   test("shared refresh scroll interaction keeps overscroll enabled", () => {
     expect(refreshScrollInteractionProps.overScrollMode).toBe("always");
     expect(refreshScrollInteractionProps.alwaysBounceVertical).toBe(true);
+  });
+
+  test("Sessions view uses the compact header instead of the large host chrome", async () => {
+    mockStore.view = "sessions";
+
+    let tree: ReactTestRenderer.ReactTestRenderer;
+
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(<AppShell />);
+    });
+
+    const labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
+
+    expect(labels).toContain("Chats");
+    expect(labels).toContain("Voice");
+    expect(labels).not.toContain("Adam Connect");
+    expect(labels).not.toContain("Refresh");
+    expect(labels).not.toContain("Disconnect");
   });
 });
 

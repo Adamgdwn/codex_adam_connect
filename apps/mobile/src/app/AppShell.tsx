@@ -6,6 +6,7 @@ import { styles } from "./mobileStyles";
 import { ChatScreen, HostScreen, PairingScreen, SessionsScreen } from "./screens";
 import type { AppState } from "../store/appStore";
 import { useAppStore } from "../store/appStore";
+import { humanizeVoiceSessionPhase } from "../services/voice/voiceSessionMachine";
 
 export function AppShell(): React.JSX.Element {
   const store = useAppStore();
@@ -13,7 +14,7 @@ export function AppShell(): React.JSX.Element {
   const setField = useAppStore((state) => state.setField);
   const selectSession = useAppStore((state) => state.selectSession);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [controlsExpanded, setControlsExpanded] = useState(store.view !== "chat");
+  const [controlsExpanded, setControlsExpanded] = useState(store.view === "host");
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -49,11 +50,31 @@ export function AppShell(): React.JSX.Element {
     selectSession(store.selectedSessionId).catch((error) => console.warn(error));
   }, [selectSession, selectedMessageCount, store.selectedSessionId, store.token]);
 
+  const keyboardInset = store.view === "sessions" || store.view === "chat" ? keyboardHeight : 0;
+  const screenBottomPadding = Math.max(insets.bottom, 16) + keyboardInset + 12;
+  const composerBottomPadding = Math.max(insets.bottom, 8);
+
+  const handleRefresh = () => {
+    store.refresh().catch((error) => console.warn(error));
+  };
+  const refreshLabel = store.refreshing ? "Refreshing..." : "Refresh";
+  const talkLabel = store.voiceSessionActive ? "End Voice" : "Start Voice";
+  const controlsLabel = controlsExpanded ? "Hide Controls" : "Show Controls";
+  const voiceStatus = humanizeVoiceStatus(store);
+  const chatHeaderSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? store.sessions[0] ?? null;
+  const isChatView = store.view === "chat";
+  const isSessionsView = store.view === "sessions";
+  const isCompactChromeView = isChatView || isSessionsView;
+  const compactTitle = isChatView ? chatHeaderSession?.title ?? "Chat" : "Chats";
+  const compactSubtitle = isChatView
+    ? `${humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · ${store.realtimeConnected ? "Live sync on" : "Reconnecting"}`
+    : `${store.sessions.length} saved · ${store.realtimeConnected ? "Live sync on" : "Reconnecting"}`;
+
   useEffect(() => {
-    if (store.view === "chat") {
+    if (isCompactChromeView) {
       setControlsExpanded(false);
     }
-  }, [store.view]);
+  }, [isCompactChromeView]);
 
   if (store.booting) {
     return (
@@ -74,20 +95,6 @@ export function AppShell(): React.JSX.Element {
       </SafeAreaView>
     );
   }
-
-  const keyboardInset = store.view === "sessions" || store.view === "chat" ? keyboardHeight : 0;
-  const screenBottomPadding = Math.max(insets.bottom, 16) + keyboardInset + 12;
-  const composerBottomPadding = Math.max(insets.bottom, 8);
-
-  const handleRefresh = () => {
-    store.refresh().catch((error) => console.warn(error));
-  };
-  const refreshLabel = store.refreshing ? "Refreshing..." : "Refresh";
-  const talkLabel = store.listening ? "Stop Mic" : store.autoSendVoice ? "Talk To Codex" : "Push To Talk";
-  const controlsLabel = controlsExpanded ? "Hide Controls" : "Show Controls";
-  const voiceStatus = humanizeVoiceStatus(store);
-  const chatHeaderSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? store.sessions[0] ?? null;
-  const isChatView = store.view === "chat";
 
   const handleNavPress = (view: "host" | "sessions" | "chat") => {
     if (view !== "chat") {
@@ -113,13 +120,11 @@ export function AppShell(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
-      {isChatView ? (
+      {isCompactChromeView ? (
         <View style={[styles.header, styles.chatAppHeader]}>
           <View style={styles.chatAppHeaderCopy}>
-            <Text style={styles.chatAppHeaderTitle}>{chatHeaderSession?.title ?? "Chat"}</Text>
-            <Text style={styles.chatAppHeaderSubtitle}>
-              {humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · {store.realtimeConnected ? "Live sync on" : "Reconnecting"}
-            </Text>
+            <Text style={styles.chatAppHeaderTitle}>{compactTitle}</Text>
+            <Text style={styles.chatAppHeaderSubtitle}>{compactSubtitle}</Text>
           </View>
           <View style={styles.chatAppHeaderActions}>
             <Pressable style={[styles.iconButton, store.refreshing ? styles.disabledButton : null]} onPress={handleRefresh} disabled={store.refreshing}>
@@ -130,7 +135,7 @@ export function AppShell(): React.JSX.Element {
               onPress={handleTalkPress}
             >
               <Text style={[styles.iconButtonLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>
-                {store.listening ? "Stop" : "Talk"}
+                {store.voiceSessionActive ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable testID="controls-toggle" style={styles.iconButton} onPress={() => setControlsExpanded((value) => !value)}>
@@ -265,8 +270,8 @@ function humanizeVoiceStatus(store: AppState): string {
   if (!store.voiceAvailable) {
     return "Voice unavailable on this phone";
   }
-  if (store.listening) {
-    return "Listening now";
+  if (store.voiceSessionActive) {
+    return humanizeVoiceSessionPhase(store.voiceSessionPhase);
   }
   if (!store.realtimeConnected) {
     return "Desktop reconnecting";

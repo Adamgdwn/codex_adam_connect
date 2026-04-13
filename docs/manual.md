@@ -54,7 +54,7 @@ flowchart TD
     F --> G[User enters desktop URL and pairing code]
     G --> H[Gateway returns a saved device link]
     H --> I[User creates or resumes a chat]
-    I --> J[Phone sends text or push-to-talk transcript]
+    I --> J[Phone sends text or live voice turn]
     J --> K[Desktop host forwards the turn to local Codex]
     K --> L[Assistant response streams back to phone and desktop]
 ```
@@ -103,7 +103,7 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 1. Open the `Chats` tab.
 2. Use the project wizard to pick an approved workspace root, name the project, describe the goal, and choose the reply style you want.
 3. Tap `Start Project Chat`, or just use the default `Operator` chat for quick turns.
-4. Open the chat and type a prompt, or use `Talk To Codex`.
+4. Open the chat and type a prompt, or tap `Start Voice`.
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
@@ -117,7 +117,7 @@ The chat screen is now intentionally tighter, with a compact top bar, a few smal
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
 - `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
 - `Chats`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
-- `Chat`: send messages, switch reply styles, use voice transcription, watch streamed replies, and stop active runs.
+- `Chat`: send messages, run the live voice loop, watch streamed replies, and stop active runs.
 
 The phone and desktop should present the same broad picture of what is happening: online/offline state, run status, recent recovery needs, and whether Codex is ready.
 The phone chat view now also shows clearer message roles, timestamps, and code blocks so longer replies are easier to scan.
@@ -130,11 +130,19 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - If the Android APK download works but installation is blocked, allow installs from the browser you used to download it.
 - If the phone pairs but replies do not appear, check the terminal running `npm run launch`.
 - If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
-- If push-to-talk says voice input is unavailable, confirm the phone has a speech recognition service enabled and set as the default Android voice service.
-- If a voice turn transcribes but does not send, check whether `Auto-send voice turns` is enabled on the `Host` screen.
-- If `Auto-send voice turns` is enabled but the app pauses instead of sending, Adam Connect likely decided the transcript was long or risky enough to require review first.
+- If voice says it is unavailable, confirm the phone has a speech recognition service enabled and set as the default Android voice service.
+- Use `Host -> Voice -> Test Spoken Reply` to verify that the phone itself can play a spoken reply before debugging the live conversation loop.
+- On Android, Adam Connect now prefers Expo speech output for spoken replies and falls back to the older Android text-to-speech module if needed.
+- On Android, Adam Connect pauses the recognizer briefly while it plays a spoken reply, then resumes listening automatically for the next turn. If you still do not hear reply audio, first check the phone's media volume and Android speech output settings.
+- The live voice loop now waits briefly before auto-sending a just-finished transcript, so a short mid-sentence pause is less likely to be treated as a brand-new turn.
+- If the live voice loop keeps reconnecting, pull to refresh once and confirm the realtime websocket is still healthy.
+- If a voice turn pauses for review instead of sending, Adam Connect likely decided the transcript was long or risky enough to require confirmation first.
 - If the app says the desktop link needs repair, use the saved desktop URL and current pairing code instead of disconnecting and re-entering everything manually.
-- If a chat says it is busy when nothing appears to be happening, pull to refresh once and then use `Stop`; the latest desktop host now recovers stale runs much more reliably than before.
+- If a chat says it is busy while the live voice loop is active, Adam Connect should now stop the current run automatically before sending the next spoken turn. If it still looks stuck, pull to refresh once and then use `Stop`.
+- `Stop` now also works as a recovery action for the current or fallback chat, even if the phone UI is no longer showing that chat as busy.
+- `Stop` also ends the live voice loop on the phone now, so the mic should stop listening immediately when you use it during a voice session.
+- On Android, Adam Connect now asks the recognizer to stop cleanly first, then force-cancels it if needed, so the microphone is less likely to stay latched after a manual stop or while reply audio is starting.
+- Adam Connect now also force-clears Android recognition on app startup and before the spoken-reply test, so stale native listening state is less likely to block reply audio even when the UI already says voice is idle.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use
@@ -144,5 +152,5 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 3. Confirm the `Host` view shows `Codex ready`.
 4. Reconnect to your existing paired desktop if needed using the saved URL and stable pairing code.
 5. Use the default `Operator` chat for quick turns, or open a named project chat when you want a separate thread.
-6. Send text or voice-transcribed prompts.
+6. Send text prompts or use the live voice loop.
 7. Stop runs from the phone when needed.

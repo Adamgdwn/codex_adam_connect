@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- replaced the old one-shot voice helper with a continuous voice session loop that keeps listening between turns, shows live transcript/audio state, starts TTS from streamed assistant deltas, and stops cleanly on barge-in
+- made Android voice playback more reliable by pausing speech recognition while reply audio is starting, then resuming the live voice loop immediately after each spoken reply
+- added an Expo speech-output fallback on Android so spoken replies no longer depend on a single flaky phone-local TTS backend
+- stopped fresh voice turns from sitting behind a long-running busy state by actively interrupting the current run before auto-sending the next captured voice turn
+- stopped the dashboard APK install links from opening a useless blank browser tab by turning them into direct downloads with explicit Android attachment headers
+- made live voice turns less trigger-happy on short pauses by buffering a finalized transcript briefly and merging immediate continuation speech into the same turn
+- added a device-side `Test Spoken Reply` control and richer Android TTS engine/voice diagnostics so reply-audio failures can be separated from live voice-loop bugs
+- made the chat `Stop` action behave like a recovery control as well as a busy-run interrupt, so users can stop or reset the best available chat even when mobile session state has drifted
+- made the chat `Stop` action end the live phone-side voice loop as well, so manual stop no longer leaves the microphone listening in the background
+- hardened Android recognizer shutdown by requesting a clean `stop()` before forcing an `abort()`, which should reduce stuck-listening and audio-focus conflicts during spoken replies
+- stopped trusting only JS voice-session state when shutting Android recognition down, and now force-clear the native recognizer before spoken-reply tests and reply playback recovery
+- trimmed the mobile `Chats` view back to the compact shell chrome so the session list regains vertical space instead of reopening the larger host header
+- added a dedicated mobile `Voice Loop` state panel plus runtime tuning knobs for interruption thresholds, backchannel tolerance, and early TTS chunking
 - reworked the mobile chat layout so messages own the main scroll area, the composer stays anchored, and the `Talk To Codex` control stays in the fixed top chrome
 - collapsed the mobile host/status/navigation chrome behind a header toggle, kept `Talk To Codex` persistent in the top-right, and surfaced clearer live voice readiness in the header
 - stopped voice auto-send from failing silently when Codex is already busy by keeping the transcript in the composer and showing an explicit waiting message

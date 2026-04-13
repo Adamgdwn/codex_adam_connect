@@ -158,6 +158,22 @@ export const styles = StyleSheet.create({
   chatChromeCard: { paddingVertical: 12, gap: 8 },
   chatResumeButton: { alignSelf: "flex-start", minHeight: 40, paddingVertical: 10, paddingHorizontal: 14 },
   messages: { gap: 8 },
+  voiceSessionCard: { gap: 10, paddingVertical: 14 },
+  voiceSessionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  voiceSessionCopy: { flex: 1, gap: 4 },
+  voiceMeterTrack: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#dbeafe",
+    overflow: "hidden"
+  },
+  voiceMeterFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#0f766e"
+  },
+  voicePreviewLabel: { color: "#1d4ed8", fontWeight: "800", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7 },
+  voiceMetrics: { color: "#475569", fontSize: 12, lineHeight: 18 },
   chatComposerCard: { marginTop: 2, padding: 10, gap: 8 },
   insetCard: {
     backgroundColor: "#fffdf8",

@@ -62,6 +62,16 @@ export function findStopTargetSession(selectedSessionId: string | null, sessions
   return sessions.find((session) => isSessionBusy(session)) ?? null;
 }
 
+export function findManualStopTargetSession(selectedSessionId: string | null, sessions: ChatSession[]): ChatSession | null {
+  return (
+    findStopTargetSession(selectedSessionId, sessions) ??
+    (selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null) ??
+    findSendTargetSession(selectedSessionId, sessions) ??
+    sessions[0] ??
+    null
+  );
+}
+
 export function isSessionBusy(session: ChatSession | null | undefined): boolean {
   return Boolean(session && (session.status === "queued" || session.status === "running" || session.status === "stopping"));
 }

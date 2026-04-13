@@ -12,6 +12,17 @@ const PREFERRED_ANDROID_SERVICE_PACKAGES = [
   "com.google.android.googlequicksearchbox"
 ];
 
+type VoiceCallbacks = {
+  onListening?(): void;
+  onSpeechStart?(): void;
+  onSpeechEnd?(): void;
+  onPartialTranscript?(text: string): void;
+  onFinalTranscript?(text: string): void;
+  onVolume?(value: number): void;
+  onReconnect?(): void;
+  onError(message: string): void;
+};
+
 function isContinuousRecognitionSupported(): boolean {
   return Platform.OS !== "android" || (typeof Platform.Version === "number" && Platform.Version >= 33);
 }
@@ -52,14 +63,18 @@ function formatVoiceError(event: ExpoSpeechRecognitionErrorEvent): string {
   }
 }
 
+function isRecoverableSessionError(event: ExpoSpeechRecognitionErrorEvent): boolean {
+  return event.error === "aborted" || event.error === "busy" || event.error === "no-speech" || event.error === "speech-timeout";
+}
+
 export class VoiceService {
   private subscriptions: Array<{ remove(): void }> = [];
   private latestTranscript = "";
-  private finishTimer: ReturnType<typeof setTimeout> | null = null;
-  private handled = false;
-  private active = false;
-  private onResult: ((text: string) => void) | null = null;
-  private onError: ((message: string) => void) | null = null;
+  private sessionActive = false;
+  private manualStopRequested = false;
+  private callbacks: VoiceCallbacks | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private forceAbortTimer: ReturnType<typeof setTimeout> | null = null;
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -77,7 +92,7 @@ export class VoiceService {
     }
   }
 
-  async startListening(onResult: (text: string) => void, onError: (message: string) => void): Promise<void> {
+  async startStreamingSession(callbacks: VoiceCallbacks): Promise<void> {
     if (!(await this.isAvailable())) {
       throw new Error("Speech recognition is not available in this build.");
     }
@@ -87,35 +102,108 @@ export class VoiceService {
       throw new Error("Microphone permission is required for voice input.");
     }
 
-    this.abortActiveSession();
-    this.onResult = onResult;
-    this.onError = onError;
+    this.stopStreamingSession();
+    this.clearForceAbortTimer();
+    this.callbacks = callbacks;
+    this.sessionActive = true;
+    this.manualStopRequested = false;
     this.latestTranscript = "";
-    this.handled = false;
-    this.active = true;
+    this.attachListeners();
+    this.startRecognition();
+  }
+
+  stopStreamingSession(): void {
+    this.manualStopRequested = true;
+    this.sessionActive = false;
+    this.clearReconnectTimer();
+    this.clearForceAbortTimer();
+
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch {
+      // Ignore cleanup failures between sessions.
+    }
+
+    this.forceAbortTimer = setTimeout(() => {
+      this.forceAbortTimer = null;
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        // Ignore forced cleanup failures between sessions.
+      }
+    }, 150);
+
+    this.cleanup();
+  }
+
+  async startListening(onResult: (text: string) => void, onError: (message: string) => void): Promise<void> {
+    await this.startStreamingSession({
+      onFinalTranscript: (text) => {
+        onResult(text);
+        this.stopStreamingSession();
+      },
+      onError
+    });
+  }
+
+  async stopListening(): Promise<void> {
+    this.stopStreamingSession();
+  }
+
+  private attachListeners(): void {
     this.subscriptions = [
+      ExpoSpeechRecognitionModule.addListener("start", () => {
+        this.callbacks?.onListening?.();
+      }),
+      ExpoSpeechRecognitionModule.addListener("speechstart", () => {
+        this.callbacks?.onSpeechStart?.();
+      }),
+      ExpoSpeechRecognitionModule.addListener("speechend", () => {
+        this.callbacks?.onSpeechEnd?.();
+      }),
+      ExpoSpeechRecognitionModule.addListener("volumechange", (event: { value: number }) => {
+        this.callbacks?.onVolume?.(event.value);
+      }),
       ExpoSpeechRecognitionModule.addListener("result", (event: ExpoSpeechRecognitionResultEvent) => {
         const transcript = event.results[0]?.transcript?.trim();
-        if (transcript) {
-          this.latestTranscript = transcript;
+        if (!transcript) {
+          return;
         }
 
-        if (event.isFinal && transcript) {
-          this.resolveResult(transcript);
+        this.latestTranscript = transcript;
+        if (event.isFinal) {
+          this.callbacks?.onFinalTranscript?.(transcript);
+          this.latestTranscript = "";
+          return;
         }
+
+        this.callbacks?.onPartialTranscript?.(transcript);
       }),
       ExpoSpeechRecognitionModule.addListener("error", (event: ExpoSpeechRecognitionErrorEvent) => {
         if (this.latestTranscript && (event.error === "no-speech" || event.error === "speech-timeout")) {
-          this.resolveResult(this.latestTranscript);
+          this.callbacks?.onFinalTranscript?.(this.latestTranscript);
+          this.latestTranscript = "";
           return;
         }
-        this.resolveError(formatVoiceError(event));
+
+        if (this.sessionActive && !this.manualStopRequested && isRecoverableSessionError(event)) {
+          this.callbacks?.onReconnect?.();
+          this.restartRecognition(300);
+          return;
+        }
+
+        this.callbacks?.onError(formatVoiceError(event));
       }),
       ExpoSpeechRecognitionModule.addListener("end", () => {
-        this.scheduleFinish(250);
+        if (this.sessionActive && !this.manualStopRequested) {
+          this.callbacks?.onReconnect?.();
+          this.restartRecognition(200);
+        }
       })
     ];
+  }
 
+  private startRecognition(): void {
     try {
       ExpoSpeechRecognitionModule.start({
         lang: "en-US",
@@ -127,100 +215,51 @@ export class VoiceService {
         androidIntentOptions: {
           EXTRA_LANGUAGE_MODEL: "free_form",
           EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS: 12000,
-          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 12000,
-          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 6000
+          EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 2500,
+          EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 1200
         }
       });
     } catch (error) {
-      this.cleanup();
-      throw error;
+      this.callbacks?.onError(error instanceof Error ? error.message : "Voice recognition could not start.");
+      this.stopStreamingSession();
     }
   }
 
-  async stopListening(): Promise<void> {
-    if (!this.active) {
-      return;
-    }
+  private restartRecognition(delayMs: number): void {
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.sessionActive || this.manualStopRequested) {
+        return;
+      }
 
-    try {
-      ExpoSpeechRecognitionModule.stop();
-      this.scheduleFinish(1500);
-    } catch {
-      this.finishCurrentSession();
-    }
-  }
-
-  private abortActiveSession(): void {
-    if (!this.active && this.subscriptions.length === 0) {
-      return;
-    }
-
-    try {
-      ExpoSpeechRecognitionModule.abort();
-    } catch {
-      // Ignore cleanup failures between sessions.
-    }
-
-    this.cleanup();
-  }
-
-  private scheduleFinish(delayMs: number): void {
-    if (this.finishTimer) {
-      clearTimeout(this.finishTimer);
-    }
-
-    this.finishTimer = setTimeout(() => {
-      this.finishCurrentSession();
+      this.startRecognition();
     }, delayMs);
   }
 
-  private finishCurrentSession(): void {
-    if (this.handled) {
+  private clearReconnectTimer(): void {
+    if (!this.reconnectTimer) {
       return;
     }
 
-    if (this.latestTranscript) {
-      this.resolveResult(this.latestTranscript);
-      return;
-    }
-
-    this.resolveError(NO_SPEECH_MESSAGE);
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
   }
 
-  private resolveResult(text: string): void {
-    if (this.handled) {
+  private clearForceAbortTimer(): void {
+    if (!this.forceAbortTimer) {
       return;
     }
 
-    const callback = this.onResult;
-    this.cleanup();
-    this.handled = true;
-    callback?.(text);
-  }
-
-  private resolveError(message: string): void {
-    if (this.handled) {
-      return;
-    }
-
-    const callback = this.onError;
-    this.cleanup();
-    this.handled = true;
-    callback?.(message);
+    clearTimeout(this.forceAbortTimer);
+    this.forceAbortTimer = null;
   }
 
   private cleanup(): void {
-    if (this.finishTimer) {
-      clearTimeout(this.finishTimer);
-      this.finishTimer = null;
-    }
-
+    this.clearReconnectTimer();
     this.subscriptions.forEach((subscription) => subscription.remove());
     this.subscriptions = [];
-    this.active = false;
     this.latestTranscript = "";
-    this.onResult = null;
-    this.onError = null;
-    this.handled = false;
+    this.callbacks = null;
   }
 }

@@ -1,6 +1,7 @@
 # Adam Connect
 
 Adam Connect turns a paired phone into a remote chat surface for the local Codex CLI running on this computer.
+It now also supports a natural-feeling live voice loop, so your desktop coding partner can actually feel like it is in your pocket instead of trapped behind a one-shot mic button.
 
 ## Status Snapshot
 
@@ -41,6 +42,9 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 - mobile sessions support operator chat plus project chat creation
 - response style controls and project wizard scaffolding are in place
 - realtime websocket auth uses short-lived tickets instead of long-lived device tokens
+- the mobile app now runs a continuous voice session loop with live transcript, early spoken playback, and barge-in handling on top of the existing websocket transport
+- Android voice playback now pauses recognition while spoken replies start, then resumes the voice loop automatically for the next turn
+- Android spoken replies now prefer Expo speech output first, then fall back to the older Android text-to-speech module if needed
 
 ## Known Issues
 
@@ -57,6 +61,7 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 - the desktop dashboard now includes an in-app `Phone Setup` tab and in-app QR surfaces
 - shell focus behavior was reduced so the app behaves more like a normal desktop window
 - state directories for the gateway and desktop host were made explicit so restarts keep a consistent identity
+- mobile voice turns now interrupt an already-busy run instead of sitting behind a stale `busy` banner
 
 ## Next Steps
 
@@ -83,7 +88,7 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 
 ### Product follow-up after realtime is stable
 
-1. tighten voice interaction and transcript cleanup
+1. validate the new realtime voice loop on a real phone and tune interruption thresholds if needed
 2. improve mobile/desktop recovery messaging
 3. finish shell-side device settings and device lifecycle controls
 4. complete Android notification validation with a real device
@@ -133,7 +138,7 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 
 - `apps/gateway`: local network API plus realtime websocket fan-out
 - `apps/desktop-extension`: desktop host runtime that supervises local Codex app-server
-- `apps/mobile`: React Native companion for pairing, chat sessions, text, and push-to-talk voice input
+- `apps/mobile`: React Native companion for pairing, chat sessions, text, and continuous bidirectional voice sessions
 
 ## Core Flow
 
@@ -142,9 +147,24 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 3. the phone pairs with that code and receives a long-lived device token
 4. the phone repairs or reconnects using that saved URL plus token when possible
 5. the phone uses a default `Operator` chat or creates named chats scoped to approved desktop roots
-5. the phone sends text or voice-transcribed text
+5. the phone sends text or live voice turns
 6. the desktop host relays that turn to the local Codex app-server
 7. the gateway streams host status, session updates, and assistant message deltas back to the phone
+
+## Voice Loop
+
+The phone no longer treats voice as a one-shot transcript helper. The main voice path is now:
+
+1. start a voice session from the mobile header
+2. the phone keeps speech recognition active across turns
+3. interim transcript appears live while you speak
+4. finalized speech is sent through the existing chat session flow
+5. assistant deltas stream back over websocket
+6. the phone starts speaking sentence-sized chunks as soon as enough reply text arrives
+7. if you interrupt, TTS stops and the current run is cancelled so the next turn can begin
+
+Risky or unusually long transcripts still pause for review instead of auto-sending silently.
+On Android, Adam Connect now prefers Expo speech for reply audio and keeps the older text-to-speech module as a fallback path.
 
 ## Auth Model
 
@@ -157,6 +177,8 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 - copy `.env.example` to `.env`
 - set `DESKTOP_APPROVED_ROOTS` to one or more absolute roots
 - optionally set `MOBILE_DEFAULT_BASE_URL` to prefill the desktop URL in local mobile builds
+- optionally tune the voice loop:
+  `MOBILE_VOICE_SESSION_ENABLED`, `MOBILE_VOICE_INTERRUPT_MIN_CHARS`, `MOBILE_VOICE_BACKCHANNEL_MAX_WORDS`, `MOBILE_VOICE_TTS_MIN_CHARS`
 - optional for Android background updates: add `apps/mobile/android/app/google-services.json` and set `FCM_SERVER_KEY`
 - launch the desktop app with `npm run launch`
 - the launcher opens the native shell when a GUI session is available
@@ -169,3 +191,4 @@ If you set `GATEWAY_ANDROID_APK_PATH` to a built APK, the desktop install/recove
 The current product priority is to make the phone feel like a persistent remote operator console for Codex rather than a thin remote terminal.
 
 Use [START_HERE.md](/home/adamgoodwin/code/agents/codex_adam_connect/START_HERE.md) for the exact setup and validation order.
+See [docs/voice-realtime-architecture.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/voice-realtime-architecture.md) for the voice upgrade assessment and implementation note.

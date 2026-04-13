@@ -143,6 +143,13 @@ const server = createServer(async (req, res) => {
       res.statusCode = 200;
       res.setHeader("content-type", "application/vnd.android.package-archive");
       res.setHeader("content-length", String(artifact.sizeBytes));
+      res.setHeader("content-disposition", 'attachment; filename="adam-connect.apk"');
+      res.setHeader("x-content-type-options", "nosniff");
+      res.setHeader("x-download-options", "noopen");
+      res.setHeader("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("pragma", "no-cache");
+      res.setHeader("expires", "0");
+      res.setHeader("surrogate-control", "no-store");
       createReadStream(artifact.filePath).pipe(res);
       return;
     }

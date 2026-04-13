@@ -117,7 +117,7 @@ export function renderDesktopPage(model: InstallPageModel): string {
               <a class="button button-primary" href="#phone-setup" data-tab-open="phone-setup">Open Phone Setup</a>
               ${
                 apkDownloadUrl
-                  ? `<a class="button button-secondary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
+                  ? `<a class="button button-secondary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
                   : `<span class="button button-muted">Android APK not built yet</span>`
               }
               <a class="button button-ghost" href="#phone-setup" data-tab-open="phone-setup">Show QR In App</a>
@@ -257,7 +257,7 @@ export function renderDesktopPage(model: InstallPageModel): string {
                   <div class="button-row">
                     ${
                       apkDownloadUrl
-                        ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
+                        ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
                         : `<span class="button button-muted">Android APK not built yet</span>`
                     }
                     <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
@@ -438,7 +438,7 @@ export function renderInstallPage(model: InstallPageModel): string {
             <div class="button-row">
               ${
                 apkDownloadUrl
-                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" target="_blank" rel="noreferrer">Download Android APK</a>`
+                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
                   : `<span class="button button-muted">Android APK not available yet</span>`
               }
               <a class="button button-secondary" href="${escapeHtml(publicBaseUrl)}">Back to Desktop Dashboard</a>

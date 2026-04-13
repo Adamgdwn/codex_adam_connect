@@ -8,7 +8,7 @@ The current near-term architecture priority is the `Operator loop`: keep one per
 
 ## Components
 
-- `apps/mobile`: pairing, host status, chat sessions, text input, push-to-talk, optional TTS
+- `apps/mobile`: pairing, host status, chat sessions, text input, continuous voice loop, and streamed TTS
 - `apps/gateway`: device pairing, token auth, session/message persistence, realtime websocket fan-out
 - `apps/desktop-extension`: host registration, Codex auth checks, Codex app-server supervision, message execution
 - browser dashboard: fallback install/recovery/admin surface served from the gateway root route
@@ -19,7 +19,7 @@ The current near-term architecture priority is the `Operator loop`: keep one per
 1. desktop host registers with the gateway and receives a host token plus pairing code
 2. phone completes pairing and receives a long-lived device token
 3. phone restores the default `Operator` session or creates a named chat bound to an approved root
-4. phone posts a user message or reviewed voice transcript
+4. phone posts a user message or live voice turn after endpointing
 5. desktop host polls for pending work, starts or resumes a Codex thread, and forwards the turn
 6. Codex app-server emits message deltas and completion notifications
 7. desktop host writes assistant deltas back to the gateway
@@ -40,7 +40,7 @@ The current near-term architecture priority is the `Operator loop`: keep one per
 - approved roots constrain chat session workspaces
 - the Electron shell is the supported desktop GUI and the browser dashboard remains a fallback install/recovery surface
 - stale device-token recovery should prefer repair of the existing phone/desktop link rather than a full disconnect-first flow
-- voice auto-send must remain explicitly user-controlled and should pause for review on risky transcripts
+- voice sessions must remain explicitly user-controlled and should pause for review on risky transcripts
 
 ## Checkpoint Summary
 

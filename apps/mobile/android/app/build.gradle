@@ -114,8 +114,8 @@ android {
         applicationId "com.adamconnectmobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 7
+        versionName "0.2.0"
         manifestPlaceholders = [usesCleartextTraffic: "true", firebaseMessagingAutoInitEnabled: hasGoogleServices ? "true" : "false"]
     }
     signingConfigs {

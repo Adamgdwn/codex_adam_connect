@@ -65,6 +65,20 @@ const baseStore = {
   pushAvailable: false,
   pushSyncing: false,
   listening: false,
+  voiceSessionActive: false,
+  voiceSessionPhase: "idle",
+  liveTranscript: "",
+  voiceAudioLevel: -2,
+  voiceAssistantDraft: null,
+  voiceTelemetry: {
+    turnsStarted: 0,
+    turnsCompleted: 0,
+    interruptions: 0,
+    reconnects: 0,
+    lastHeardAt: null,
+    lastAssistantStartedAt: null,
+    lastRoundTripMs: null
+  },
   lastSpokenMessageId: null,
   notice: null,
   error: null,
@@ -86,6 +100,7 @@ const baseStore = {
   revokeDevice: jest.fn(async () => undefined),
   toggleAutoSpeak: jest.fn(async () => undefined),
   toggleAutoSendVoice: jest.fn(async () => undefined),
+  testAssistantVoice: jest.fn(async () => undefined),
   toggleListening: jest.fn(async () => undefined),
   setResponseStyle: jest.fn(async () => undefined),
   setRenameDraft: jest.fn(),
@@ -133,6 +148,34 @@ describe("ChatScreen busy send state", () => {
     await ReactTestRenderer.act(async () => {
       tree = ReactTestRenderer.create(
         <ChatScreen store={mismatchedStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} />
+      );
+    });
+
+    const stopButton = tree!.root.findByProps({ testID: "chat-stop-button" });
+
+    expect(stopButton.props.disabled).toBe(false);
+  });
+
+  test("keeps Stop available as a recovery action even when the selected chat is idle", async () => {
+    const idleStore = {
+      ...baseStore,
+      sessions: [
+        {
+          ...baseStore.sessions[0],
+          id: "session-1",
+          title: "Operator",
+          status: "idle",
+          activeTurnId: null
+        }
+      ],
+      selectedSessionId: "session-1"
+    } as AppState;
+
+    let tree: ReactTestRenderer.ReactTestRenderer;
+
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(
+        <ChatScreen store={idleStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} />
       );
     });
 

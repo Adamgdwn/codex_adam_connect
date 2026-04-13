@@ -1,6 +1,7 @@
 import { buildProjectStarterPrompt, buildTurnPrompt } from "@adam-connect/shared";
 import type { ChatSession } from "@adam-connect/shared";
 import {
+  findManualStopTargetSession,
   findSendTargetSession,
   findStopTargetSession,
   formatMessageTimestamp,
@@ -40,6 +41,16 @@ describe("operatorConsole helpers", () => {
 
     expect(findStopTargetSession("2", sessions)?.id).toBe("1");
     expect(findStopTargetSession("1", sessions)?.id).toBe("1");
+  });
+
+  test("findManualStopTargetSession falls back to the selected or latest chat for recovery", () => {
+    const sessions = [
+      makeSession({ id: "1", title: "Operator", status: "idle", updatedAt: "2026-04-12T11:00:00.000Z" }),
+      makeSession({ id: "2", title: "Notes", status: "idle", updatedAt: "2026-04-12T12:00:00.000Z" })
+    ];
+
+    expect(findManualStopTargetSession("2", sessions)?.id).toBe("2");
+    expect(findManualStopTargetSession(null, sessions)?.id).toBe("1");
   });
 
   test("requiresVoiceReview flags risky or long transcripts", () => {

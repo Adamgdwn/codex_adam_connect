@@ -44,9 +44,28 @@ jest.mock('expo-speech-recognition', () => {
 
 jest.mock('react-native-tts', () => ({
   default: {
+    getInitStatus: jest.fn(async () => 'success'),
+    setDefaultLanguage: jest.fn(async () => 'success'),
+    setDefaultRate: jest.fn(async () => 'success'),
+    setDucking: jest.fn(async () => 'success'),
     speak: jest.fn(),
     stop: jest.fn(),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
   },
+}));
+
+jest.mock('expo-speech', () => ({
+  speak: jest.fn(),
+  stop: jest.fn(),
+  getAvailableVoicesAsync: jest.fn(async () => [
+    {
+      identifier: 'expo-en-us',
+      name: 'English US',
+      language: 'en-US',
+      quality: 'Enhanced',
+    },
+  ]),
 }));
 
 jest.mock('react-native-permissions', () => ({
