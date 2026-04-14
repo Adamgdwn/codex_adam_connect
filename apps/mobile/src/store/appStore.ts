@@ -1,15 +1,27 @@
 import { create } from "zustand";
 import { Platform } from "react-native";
 import { buildProjectStarterPrompt } from "@adam-connect/shared";
-import type { ChatMessage, ChatSession, HostStatus, InputMode, NotificationEvent, PairedDevice, ResponseStyle, StreamEvent } from "@adam-connect/shared";
+import type {
+  ChatMessage,
+  ChatSession,
+  HostStatus,
+  InputMode,
+  NotificationEvent,
+  OutboundRecipient,
+  PairedDevice,
+  ResponseStyle,
+  StreamEvent,
+  WakeControl
+} from "@adam-connect/shared";
 import type { ProjectTemplateId } from "@adam-connect/shared";
 import { ApiClient } from "../services/api/client";
-import { clearSettings, loadSettings, saveSettings } from "../services/storage/settingsStorage";
+import { clearSettings, loadSettings, saveSettings, type StoredSettings } from "../services/storage/settingsStorage";
 import { clearDeviceToken, loadDeviceToken, saveDeviceToken } from "../services/storage/tokenStorage";
 import { FcmService } from "../services/notifications/fcmService";
 import { AssistantSpeechRuntime } from "../services/voice/assistantSpeechRuntime";
-import { TtsService } from "../services/voice/ttsService";
+import { TtsService, type TtsVoiceOption } from "../services/voice/ttsService";
 import { VoiceService } from "../services/voice/voiceService";
+import { WakeRelayClient } from "../services/wake/wakeRelayClient";
 import { normalizeBaseUrl, websocketUrlFromBase } from "../config";
 import {
   DEFAULT_BASE_URL,
@@ -47,6 +59,8 @@ type EditableField =
   | "newSessionRootPath"
   | "newSessionTitle"
   | "responseStyle"
+  | "outboundRecipientLabelDraft"
+  | "outboundRecipientEmailDraft"
   | "projectIntent"
   | "projectInstructions"
   | "projectOutputType"
@@ -60,6 +74,14 @@ interface VoiceTelemetry {
   lastHeardAt: string | null;
   lastAssistantStartedAt: string | null;
   lastRoundTripMs: number | null;
+}
+
+interface ExternalDraftState {
+  sessionId: string;
+  messageId: string;
+  recipientId: string | null;
+  subject: string;
+  intro: string;
 }
 
 export interface AppState {
@@ -87,6 +109,15 @@ export interface AppState {
   projectOutputType: string;
   projectTemplateId: ProjectTemplateId;
   responseStyle: ResponseStyle;
+  assistantVoices: TtsVoiceOption[];
+  selectedAssistantVoiceId: string | null;
+  wakeControl: WakeControl | null;
+  wakeRequesting: boolean;
+  outboundRecipients: OutboundRecipient[];
+  outboundRecipientLabelDraft: string;
+  outboundRecipientEmailDraft: string;
+  externalDraft: ExternalDraftState | null;
+  sendingExternalMessage: boolean;
   renameDraftBySession: Record<string, string>;
   autoSpeak: boolean;
   autoSendVoice: boolean;
@@ -122,8 +153,16 @@ export interface AppState {
   toggleAutoSpeak(): Promise<void>;
   toggleAutoSendVoice(): Promise<void>;
   testAssistantVoice(): Promise<void>;
+  triggerWakeHomebase(): Promise<void>;
+  addOutboundRecipient(): Promise<void>;
+  deleteOutboundRecipient(recipientId: string): Promise<void>;
+  beginExternalMessageDraft(messageId: string, sessionId: string): void;
+  cancelExternalMessageDraft(): void;
+  updateExternalDraft(field: "recipientId" | "subject" | "intro", value: string): void;
+  sendExternalMessage(): Promise<void>;
   toggleListening(): Promise<void>;
   setResponseStyle(style: ResponseStyle): Promise<void>;
+  selectAssistantVoice(voiceId: string | null): Promise<void>;
   setRenameDraft(sessionId: string, value: string): void;
   setField<K extends EditableField>(field: K, value: AppState[K]): void;
   setView(view: View): void;
@@ -134,6 +173,7 @@ const voice = new VoiceService();
 const fcm = new FcmService();
 const tts = new TtsService();
 const assistantSpeech = new AssistantSpeechRuntime(tts);
+const wakeRelay = new WakeRelayClient();
 let socket: WebSocket | null = null;
 let unsubscribePushTokenRefresh: (() => void) | null = null;
 let voiceInterruptRequested = false;
@@ -151,6 +191,52 @@ const defaultVoiceTelemetry = (): VoiceTelemetry => ({
   lastAssistantStartedAt: null,
   lastRoundTripMs: null
 });
+
+function normalizeStoredSettings(settings: Partial<StoredSettings> & Pick<StoredSettings, "baseUrl" | "deviceName" | "autoSpeak" | "autoSendVoice">): StoredSettings {
+  return {
+    baseUrl: settings.baseUrl,
+    deviceName: settings.deviceName,
+    currentDeviceId: settings.currentDeviceId ?? null,
+    autoSpeak: settings.autoSpeak,
+    autoSendVoice: settings.autoSendVoice,
+    responseStyle: settings.responseStyle ?? "natural",
+    assistantVoiceId: settings.assistantVoiceId ?? null,
+    wakeControl: settings.wakeControl ?? null
+  };
+}
+
+function buildStoredSettings(state: AppState, overrides: Partial<StoredSettings> = {}): StoredSettings {
+  return normalizeStoredSettings({
+    baseUrl: overrides.baseUrl ?? state.baseUrl,
+    deviceName: overrides.deviceName ?? state.deviceName,
+    currentDeviceId: overrides.currentDeviceId ?? state.currentDeviceId,
+    autoSpeak: overrides.autoSpeak ?? state.autoSpeak,
+    autoSendVoice: overrides.autoSendVoice ?? state.autoSendVoice,
+    responseStyle: overrides.responseStyle ?? state.responseStyle,
+    assistantVoiceId: overrides.assistantVoiceId ?? state.selectedAssistantVoiceId,
+    wakeControl: overrides.wakeControl ?? state.wakeControl
+  });
+}
+
+async function persistSettings(get: () => AppState, overrides: Partial<StoredSettings> = {}): Promise<void> {
+  await saveSettings(buildStoredSettings(get(), overrides));
+}
+
+async function loadAssistantVoiceState(preferredVoiceId: string | null): Promise<{
+  assistantVoices: TtsVoiceOption[];
+  selectedAssistantVoiceId: string | null;
+}> {
+  await tts.prepare(preferredVoiceId).catch(() => false);
+  await tts.setPreferredVoice(preferredVoiceId).catch(() => null);
+  const assistantVoices = await tts.listVoices().catch(() => []);
+  const selectedAssistantVoiceId =
+    preferredVoiceId && assistantVoices.some((voiceOption) => voiceOption.id === preferredVoiceId) ? preferredVoiceId : null;
+
+  return {
+    assistantVoices,
+    selectedAssistantVoiceId
+  };
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   booting: true,
@@ -177,6 +263,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   projectOutputType: "implementation plan",
   projectTemplateId: "greenfield",
   responseStyle: "natural",
+  assistantVoices: [],
+  selectedAssistantVoiceId: null,
+  wakeControl: null,
+  wakeRequesting: false,
+  outboundRecipients: [],
+  outboundRecipientLabelDraft: "",
+  outboundRecipientEmailDraft: "",
+  externalDraft: null,
+  sendingExternalMessage: false,
   renameDraftBySession: {},
   autoSpeak: false,
   autoSendVoice: true,
@@ -195,7 +290,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   error: null,
   async bootstrap() {
     voice.stopStreamingSession();
-    tts.prepare().catch(() => undefined);
     assistantSpeech.configure({
       onBeforeSpeak: () => {
         pauseVoiceLoopForAssistant(get, set);
@@ -246,6 +340,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       voice.isAvailable()
     ]);
 
+    const assistantVoiceState = await loadAssistantVoiceState(settings?.assistantVoiceId ?? null);
+    if (settings?.assistantVoiceId && assistantVoiceState.selectedAssistantVoiceId === null) {
+      await saveSettings({
+        ...normalizeStoredSettings({
+          baseUrl: settings.baseUrl,
+          deviceName: settings.deviceName,
+          currentDeviceId: settings.currentDeviceId ?? null,
+          autoSpeak: settings.autoSpeak,
+          autoSendVoice: settings.autoSendVoice,
+          responseStyle: settings.responseStyle,
+          assistantVoiceId: null,
+          wakeControl: settings.wakeControl ?? null
+        })
+      });
+    }
+
     set({
       baseUrl: settings?.baseUrl ?? DEFAULT_BASE_URL,
       deviceName: settings?.deviceName ?? "Adam's Phone",
@@ -253,6 +363,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       autoSpeak: settings?.autoSpeak ?? false,
       autoSendVoice: settings?.autoSendVoice ?? true,
       responseStyle: settings?.responseStyle ?? "natural",
+      assistantVoices: assistantVoiceState.assistantVoices,
+      selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
+      wakeControl: settings?.wakeControl ?? null,
+      outboundRecipients: [],
       token,
       voiceAvailable,
       pushAvailable: fcm.isAvailable(),
@@ -272,13 +386,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: null });
     try {
       const paired = await api.completePairing(baseUrl, get().pairingCode.trim().toUpperCase(), get().deviceName.trim());
-      await saveSettings({
+      await persistSettings(get, {
         baseUrl,
         deviceName: get().deviceName.trim(),
-        currentDeviceId: paired.device.id,
-        autoSpeak: get().autoSpeak,
-        autoSendVoice: get().autoSendVoice,
-        responseStyle: get().responseStyle
+        currentDeviceId: paired.device.id
       });
       await saveDeviceToken(paired.deviceToken);
       set({
@@ -299,6 +410,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             transportSecurity: "insecure",
             installUrl: "https://tailscale.com/download",
             loginUrl: "https://login.tailscale.com/start"
+          },
+          wakeControl: settingsWakeControl(get),
+          outboundEmail: {
+            enabled: false,
+            provider: "none",
+            fromAddress: null,
+            replyToAddress: null,
+            recipientCount: 0
           },
           availability: "reconnecting",
           repairState: "reconnecting",
@@ -350,7 +469,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       projectInstructions: "",
       projectOutputType: "implementation plan",
       projectTemplateId: "greenfield",
+      responseStyle: "natural",
+      assistantVoices: [],
+      selectedAssistantVoiceId: null,
+      wakeControl: null,
+      wakeRequesting: false,
+      outboundRecipients: [],
+      outboundRecipientLabelDraft: "",
+      outboundRecipientEmailDraft: "",
+      externalDraft: null,
+      sendingExternalMessage: false,
       renameDraftBySession: {},
+      autoSpeak: false,
       autoSendVoice: true,
       listening: false,
       voiceSessionActive: false,
@@ -374,10 +504,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
     set({ refreshing: true });
     try {
-      const [hostStatus, sessions, devices] = await Promise.all([
+      const [hostStatus, sessions, devices, outboundRecipients] = await Promise.all([
         api.getHostStatus(token, baseUrl),
         api.listSessions(token, baseUrl),
-        api.listDevices(token, baseUrl)
+        api.listDevices(token, baseUrl),
+        api.listOutboundRecipients(token, baseUrl)
       ]);
       const currentSelected = get().selectedSessionId;
       const nextSelected = pickPreferredSessionId(currentSelected, sessions);
@@ -386,20 +517,19 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? get().currentDeviceId
           : devices.find((device) => device.deviceName === get().deviceName)?.id ?? devices[0]?.id ?? null;
 
-      if (currentDeviceId !== get().currentDeviceId) {
-        await saveSettings({
+      if (currentDeviceId !== get().currentDeviceId || !wakeControlsEqual(hostStatus.wakeControl, get().wakeControl)) {
+        await persistSettings(get, {
           baseUrl,
-          deviceName: get().deviceName,
           currentDeviceId,
-          autoSpeak: get().autoSpeak,
-          autoSendVoice: get().autoSendVoice,
-          responseStyle: get().responseStyle
+          wakeControl: hostStatus.wakeControl
         });
       }
 
       set({
         hostStatus,
+        wakeControl: hostStatus.wakeControl,
         devices,
+        outboundRecipients,
         currentDeviceId,
         sessions: sortSessionsForDisplay(sessions),
         selectedSessionId: nextSelected,
@@ -739,13 +869,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const renamed = await api.renameDevice(token, baseUrl, deviceId, {
         deviceName: get().deviceName.trim()
       });
-      await saveSettings({
+      await persistSettings(get, {
         baseUrl,
         deviceName: renamed.deviceName,
-        currentDeviceId: deviceId,
-        autoSpeak: get().autoSpeak,
-        autoSendVoice: get().autoSendVoice,
-        responseStyle: get().responseStyle
+        currentDeviceId: deviceId
       });
       set((state) => ({
         deviceName: renamed.deviceName,
@@ -766,13 +893,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const pushToken = await fcm.requestPushToken();
       const updatedDevice = await api.registerPushToken(token, baseUrl, deviceId, { pushToken });
       syncPushTokenRefresh(baseUrl, token, get, set);
-      await saveSettings({
+      await persistSettings(get, {
         baseUrl,
-        deviceName: get().deviceName,
-        currentDeviceId: deviceId,
-        autoSpeak: get().autoSpeak,
-        autoSendVoice: get().autoSendVoice,
-        responseStyle: get().responseStyle
+        currentDeviceId: deviceId
       });
       set((state) => ({
         devices: state.devices.map((device) => (device.id === updatedDevice.id ? updatedDevice : device)),
@@ -838,26 +961,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   async toggleAutoSpeak() {
     const next = !get().autoSpeak;
-    await saveSettings({
-      baseUrl: get().baseUrl,
-      deviceName: get().deviceName,
-      currentDeviceId: get().currentDeviceId,
-      autoSpeak: next,
-      autoSendVoice: get().autoSendVoice,
-      responseStyle: get().responseStyle
-    });
+    await persistSettings(get, { autoSpeak: next });
     set({ autoSpeak: next });
   },
   async toggleAutoSendVoice() {
     const next = !get().autoSendVoice;
-    await saveSettings({
-      baseUrl: get().baseUrl,
-      deviceName: get().deviceName,
-      currentDeviceId: get().currentDeviceId,
-      autoSpeak: get().autoSpeak,
-      autoSendVoice: next,
-      responseStyle: get().responseStyle
-    });
+    await persistSettings(get, { autoSendVoice: next });
     set({ autoSendVoice: next });
   },
   async testAssistantVoice() {
@@ -871,12 +980,200 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     voice.stopStreamingSession();
     assistantSpeech.stop();
+    const assistantVoiceState = await loadAssistantVoiceState(get().selectedAssistantVoiceId);
     const detail = await tts.describeAvailability();
     const spoken = tts.speak("This is Adam Connect. If you can hear this, spoken replies are working on this phone.");
     set({
+      assistantVoices: assistantVoiceState.assistantVoices,
+      selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
       notice: spoken ? `Testing spoken reply. ${detail}` : detail,
       error: null
     });
+  },
+  async triggerWakeHomebase() {
+    const wakeControl = get().wakeControl;
+    if (!wakeControl?.enabled) {
+      set({
+        notice: null,
+        error: "Wake-on-request is not configured on this desktop yet."
+      });
+      return;
+    }
+
+    set({
+      wakeRequesting: true,
+      notice: `Sending a wake request for ${wakeControl.targetLabel ?? "Homebase"}...`,
+      error: null
+    });
+
+    try {
+      const result = await wakeRelay.wake(wakeControl);
+      set({
+        wakeRequesting: false,
+        notice:
+          result.status === "awake"
+            ? `${result.targetLabel} is waking up now. Adam Connect will reconnect when the desktop heartbeat comes back.`
+            : `${result.targetLabel} wake result: ${result.status}. ${result.detail ?? "Waiting for the desktop heartbeat."}`,
+        error: result.status === "error" ? result.detail ?? "Wake relay reported an error." : null
+      });
+    } catch (error) {
+      set({
+        wakeRequesting: false,
+        notice: null,
+        error: error instanceof Error ? error.message : "Could not reach the wake relay."
+      });
+    }
+  },
+  async addOutboundRecipient() {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      const label = get().outboundRecipientLabelDraft.trim();
+      const destination = get().outboundRecipientEmailDraft.trim();
+      if (!label || !destination) {
+        set({
+          notice: null,
+          error: "Add both a recipient label and an email address first."
+        });
+        return;
+      }
+
+      const recipient = await api.createOutboundRecipient(token, baseUrl, {
+        label,
+        destination
+      });
+      set((state) => ({
+        outboundRecipients: [...state.outboundRecipients.filter((item) => item.id !== recipient.id), recipient].sort((left, right) =>
+          left.label.localeCompare(right.label)
+        ),
+        outboundRecipientLabelDraft: "",
+        outboundRecipientEmailDraft: "",
+        hostStatus: state.hostStatus
+          ? {
+              ...state.hostStatus,
+              outboundEmail: {
+                ...state.hostStatus.outboundEmail,
+                recipientCount: state.hostStatus.outboundEmail.recipientCount + 1
+              }
+            }
+          : state.hostStatus,
+        notice: `${recipient.label} is now a trusted outbound recipient.`,
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not add that outbound recipient.");
+    }
+  },
+  async deleteOutboundRecipient(recipientId) {
+    try {
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      await api.deleteOutboundRecipient(token, baseUrl, recipientId);
+      set((state) => ({
+        outboundRecipients: state.outboundRecipients.filter((item) => item.id !== recipientId),
+        externalDraft:
+          state.externalDraft?.recipientId === recipientId
+            ? {
+                ...state.externalDraft,
+                recipientId: null
+              }
+            : state.externalDraft,
+        hostStatus: state.hostStatus
+          ? {
+              ...state.hostStatus,
+              outboundEmail: {
+                ...state.hostStatus.outboundEmail,
+                recipientCount: Math.max(0, state.hostStatus.outboundEmail.recipientCount - 1)
+              }
+            }
+          : state.hostStatus,
+        notice: "Trusted outbound recipient removed.",
+        error: null
+      }));
+    } catch (error) {
+      await handleStoreError(error, set, get, "Could not remove that outbound recipient.");
+    }
+  },
+  beginExternalMessageDraft(messageId, sessionId) {
+    const session = get().sessions.find((item) => item.id === sessionId) ?? null;
+    const message = get().messagesBySession[sessionId]?.find((item) => item.id === messageId) ?? null;
+    if (!session || !message || message.role !== "assistant" || message.status !== "completed") {
+      set({
+        notice: null,
+        error: "Choose a completed assistant reply before sending it externally."
+      });
+      return;
+    }
+
+    set((state) => ({
+      externalDraft: {
+        sessionId,
+        messageId,
+        recipientId: state.outboundRecipients[0]?.id ?? null,
+        subject: buildExternalSubject(session.title, message.content),
+        intro: ""
+      },
+      notice: state.outboundRecipients.length
+        ? "External send draft ready. Choose a recipient, review the subject, and send when ready."
+        : "External send draft ready. Add a trusted recipient on the Host tab before sending.",
+      error: null,
+      view: "chat"
+    }));
+  },
+  cancelExternalMessageDraft() {
+    set({
+      externalDraft: null,
+      sendingExternalMessage: false,
+      notice: null,
+      error: null
+    });
+  },
+  updateExternalDraft(field, value) {
+    set((state) => ({
+      externalDraft: state.externalDraft
+        ? {
+            ...state.externalDraft,
+            [field]: value
+          }
+        : state.externalDraft
+    }));
+  },
+  async sendExternalMessage() {
+    try {
+      const draft = requireValue(get().externalDraft, "Choose a completed assistant reply before sending it externally.");
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
+      if (!draft.recipientId) {
+        set({
+          notice: null,
+          error: "Choose a trusted recipient before sending externally."
+        });
+        return;
+      }
+
+      set({
+        sendingExternalMessage: true,
+        notice: null,
+        error: null
+      });
+      const response = await api.sendExternalMessage(token, baseUrl, {
+        sessionId: draft.sessionId,
+        messageId: draft.messageId,
+        recipientId: draft.recipientId,
+        subject: draft.subject.trim(),
+        intro: draft.intro.trim()
+      });
+      set({
+        sendingExternalMessage: false,
+        externalDraft: null,
+        notice: `External report sent to ${response.recipient.destination}.`,
+        error: null
+      });
+      await get().refresh();
+    } catch (error) {
+      set({ sendingExternalMessage: false });
+      await handleStoreError(error, set, get, "Could not send that external report.");
+    }
   },
   async toggleListening() {
     if (!VOICE_SESSION_ENABLED) {
@@ -931,15 +1228,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     await startVoiceLoopRecognition(get, set);
   },
   async setResponseStyle(style) {
-    await saveSettings({
-      baseUrl: get().baseUrl,
-      deviceName: get().deviceName,
-      currentDeviceId: get().currentDeviceId,
-      autoSpeak: get().autoSpeak,
-      autoSendVoice: get().autoSendVoice,
-      responseStyle: style
-    });
+    await persistSettings(get, { responseStyle: style });
     set({ responseStyle: style, notice: `Reply style set to ${style}.`, error: null });
+  },
+  async selectAssistantVoice(voiceId) {
+    const assistantVoiceState = await loadAssistantVoiceState(voiceId);
+    await persistSettings(get, {
+      assistantVoiceId: assistantVoiceState.selectedAssistantVoiceId
+    });
+    const selectedVoice =
+      assistantVoiceState.assistantVoices.find((voiceOption) => voiceOption.id === assistantVoiceState.selectedAssistantVoiceId) ?? null;
+    set({
+      assistantVoices: assistantVoiceState.assistantVoices,
+      selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
+      notice: selectedVoice
+        ? `Spoken reply voice set to ${selectedVoice.label}. Use Test Spoken Reply to preview it.`
+        : "Spoken reply voice reset to automatic. Adam Connect will use the phone's default English voice.",
+      error: null
+    });
   },
   setRenameDraft(sessionId, value) {
     set((state) => ({
@@ -1126,6 +1432,27 @@ function stopActiveVoiceLoop(
     error: overrides?.error ?? null
   });
   voiceInterruptRequested = false;
+}
+
+function settingsWakeControl(get: () => AppState): WakeControl {
+  return (
+    get().wakeControl ?? {
+      enabled: false,
+      relayBaseUrl: null,
+      relayToken: null,
+      targetId: null,
+      targetLabel: null
+    }
+  );
+}
+
+function wakeControlsEqual(left: WakeControl | null, right: WakeControl | null): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function buildExternalSubject(sessionTitle: string, messageContent: string): string {
+  const preview = messageContent.trim().replace(/\s+/g, " ").slice(0, 72).trim();
+  return preview ? `${sessionTitle}: ${preview}` : `${sessionTitle}: Adam Connect update`;
 }
 
 function clearPendingVoiceCommitTimer(): void {
@@ -1366,6 +1693,7 @@ function applyStreamEvent(
   if (payload.type === "host_status") {
     set({
       hostStatus: payload.hostStatus,
+      wakeControl: payload.hostStatus.wakeControl,
       newSessionRootPath: get().newSessionRootPath || payload.hostStatus.host.approvedRoots[0] || ""
     });
     return;

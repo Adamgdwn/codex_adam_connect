@@ -11,6 +11,8 @@ Operate the local gateway and desktop host so a paired phone can chat with the l
 - mobile websocket disconnects: verify the desktop URL, `GATEWAY_HOST`, and Tailscale path
 - session stuck in `running`: inspect desktop host logs and restart the host if the local app-server exited
 - `This phone needs to repair its desktop link`: keep the saved desktop URL, then reconnect with the stable pairing code instead of doing a full disconnect-first setup
+- wake fails while the workstation is asleep: verify the wake relay is online, the relay token matches, and the target MAC/broadcast settings are correct
+- outbound email fails: verify `RESEND_API_KEY`, the verified sender domain, and the `OUTBOUND_EMAIL_FROM` address
 
 ## Recovery
 
@@ -27,6 +29,8 @@ Operate the local gateway and desktop host so a paired phone can chat with the l
 - Node.js
 - React Native build toolchain
 - private network reachability between phone and desktop
+- optional always-on LAN node for the wake relay
+- optional outbound email provider credentials on the gateway machine
 
 ## Status
 

@@ -1,6 +1,15 @@
 import { Platform } from "react-native";
 import { sanitizeTextForSpeech } from "../../utils/operatorConsole";
 
+export interface TtsVoiceOption {
+  id: string;
+  label: string;
+  language: string;
+  qualityLabel: string | null;
+  backend: "expo-speech" | "react-native-tts";
+  nativeIdentifier?: string | null;
+}
+
 type ReactNativeTtsModule = {
   voices?(): Promise<
     Array<{
@@ -107,14 +116,20 @@ export class TtsService {
   private errorHandler: ((message: string) => void) | null = null;
   private handlers: SpeechHandlers = {};
   private expoVoice: { language: string; identifier?: string } | null = null;
+  private preferredVoiceId: string | null = null;
+  private selectedVoiceId: string | null = null;
 
   isAvailable(): boolean {
     return this.resolveBackend() !== null;
   }
 
-  async prepare(): Promise<boolean> {
+  async prepare(preferredVoiceId?: string | null): Promise<boolean> {
     if (!this.isAvailable()) {
       return false;
+    }
+
+    if (preferredVoiceId !== undefined) {
+      this.preferredVoiceId = preferredVoiceId;
     }
 
     if (!this.initPromise) {
@@ -122,6 +137,30 @@ export class TtsService {
     }
 
     return this.initPromise;
+  }
+
+  async listVoices(): Promise<TtsVoiceOption[]> {
+    const backend = this.resolveBackend();
+    if (!backend) {
+      return [];
+    }
+
+    const ready = await this.prepare();
+    if (!ready) {
+      return [];
+    }
+
+    return backend === "expo-speech" ? this.getExpoVoiceOptions() : this.getReactNativeVoiceOptions();
+  }
+
+  async setPreferredVoice(voiceId: string | null): Promise<TtsVoiceOption | null> {
+    this.preferredVoiceId = voiceId;
+    const ready = await this.prepare();
+    if (!ready) {
+      return null;
+    }
+
+    return this.applyPreferredVoice();
   }
 
   configureHandlers(handlers: {
@@ -180,21 +219,23 @@ export class TtsService {
 
     const ready = await this.prepare();
     if (backend === "expo-speech") {
-      const voices = (await this.expoSpeech?.getAvailableVoicesAsync?.().catch(() => [])) ?? [];
-      const englishVoices = voices.filter((voice) => /^en(?:[-_]|$)/i.test(voice.language ?? ""));
+      const voices = await this.getExpoVoiceOptions();
+      const englishVoices = voices.filter((voice) => /^en(?:[-_]|$)/i.test(voice.language));
+      const currentVoice = voices.find((voice) => voice.id === this.selectedVoiceId);
       return ready
-        ? `Phone speech output is ready using Expo speech. English voices available: ${englishVoices.length}.`
-        : `Phone speech output is not ready using Expo speech. English voices available: ${englishVoices.length}.`;
+        ? `Phone speech output is ready using Expo speech. Current voice: ${currentVoice?.label ?? "default English"}. English voices available: ${englishVoices.length}.`
+        : `Phone speech output is not ready using Expo speech. Current voice: ${currentVoice?.label ?? "default English"}. English voices available: ${englishVoices.length}.`;
     }
 
     const engines = (await this.reactNativeTts?.engines?.().catch(() => [])) ?? [];
-    const voices = (await this.reactNativeTts?.voices?.().catch(() => [])) ?? [];
-    const installedEnglishVoices = voices.filter((voice) => !voice.notInstalled && /^en(?:[-_]|$)/i.test(voice.language));
+    const voices = await this.getReactNativeVoiceOptions();
+    const installedEnglishVoices = voices.filter((voice) => /^en(?:[-_]|$)/i.test(voice.language));
     const defaultEngine = engines.find((engine) => engine.default)?.label ?? engines[0]?.label ?? "none detected";
+    const currentVoice = voices.find((voice) => voice.id === this.selectedVoiceId);
 
     return ready
-      ? `Phone speech output is ready using Android text-to-speech. Default engine: ${defaultEngine}. English voices available: ${installedEnglishVoices.length}.`
-      : `Phone speech output is not ready using Android text-to-speech. Default engine: ${defaultEngine}. English voices available: ${installedEnglishVoices.length}.`;
+      ? `Phone speech output is ready using Android text-to-speech. Default engine: ${defaultEngine}. Current voice: ${currentVoice?.label ?? "default English"}. English voices available: ${installedEnglishVoices.length}.`
+      : `Phone speech output is not ready using Android text-to-speech. Default engine: ${defaultEngine}. Current voice: ${currentVoice?.label ?? "default English"}. English voices available: ${installedEnglishVoices.length}.`;
   }
 
   private async initialize(): Promise<boolean> {
@@ -232,21 +273,13 @@ export class TtsService {
     }
 
     try {
-      const voices = (await this.expoSpeech.getAvailableVoicesAsync?.().catch(() => [])) ?? [];
-      const preferredVoice =
-        voices.find((voice) => /^en(?:-|_)US$/i.test(voice.language ?? "")) ??
-        voices.find((voice) => /^en(?:[-_]|$)/i.test(voice.language ?? "")) ??
-        null;
-
-      this.expoVoice = {
-        language: preferredVoice?.language ?? "en-US",
-        ...(Platform.OS !== "android" && preferredVoice?.identifier ? { identifier: preferredVoice.identifier } : {})
-      };
+      await this.applyExpoVoicePreference();
       return true;
     } catch {
       this.expoVoice = {
         language: "en-US"
       };
+      this.selectedVoiceId = null;
       return true;
     }
   }
@@ -264,22 +297,9 @@ export class TtsService {
         await this.reactNativeTts.setDefaultEngine?.(defaultEngine.name).catch(() => true);
       }
 
-      const voices = (await this.reactNativeTts.voices?.().catch(() => [])) ?? [];
-      const preferredVoice =
-        voices.find((voice) => !voice.notInstalled && !voice.networkConnectionRequired && /^en(?:-|_)US$/i.test(voice.language)) ??
-        voices.find((voice) => !voice.notInstalled && !voice.networkConnectionRequired && /^en(?:[-_]|$)/i.test(voice.language)) ??
-        voices.find((voice) => !voice.notInstalled && /^en(?:[-_]|$)/i.test(voice.language)) ??
-        null;
-
-      if (preferredVoice?.id) {
-        await this.reactNativeTts.setDefaultVoice?.(preferredVoice.id).catch(() => true);
-        await this.reactNativeTts.setDefaultLanguage?.(preferredVoice.language).catch(() => true);
-      } else {
-        await this.reactNativeTts.setDefaultLanguage?.("en-US").catch(() => true);
-      }
-
       await this.reactNativeTts.setDefaultRate?.(0.5, true).catch(() => "success");
       await this.reactNativeTts.setDucking?.(true).catch(() => true);
+      await this.applyReactNativeVoicePreference();
       return true;
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
@@ -358,4 +378,97 @@ export class TtsService {
       }
     });
   }
+
+  private async applyPreferredVoice(): Promise<TtsVoiceOption | null> {
+    const backend = this.resolveBackend();
+    if (!backend) {
+      this.selectedVoiceId = null;
+      return null;
+    }
+
+    return backend === "expo-speech" ? this.applyExpoVoicePreference() : this.applyReactNativeVoicePreference();
+  }
+
+  private async applyExpoVoicePreference(): Promise<TtsVoiceOption | null> {
+    const voices = await this.getExpoVoiceOptions();
+    const preferredVoice =
+      (this.preferredVoiceId ? voices.find((voice) => voice.id === this.preferredVoiceId) : null) ??
+      voices.find((voice) => /^en(?:-|_)US$/i.test(voice.language)) ??
+      voices.find((voice) => /^en(?:[-_]|$)/i.test(voice.language)) ??
+      voices[0] ??
+      null;
+
+    this.selectedVoiceId = preferredVoice?.id ?? null;
+    this.expoVoice = {
+      language: preferredVoice?.language ?? "en-US",
+      ...(preferredVoice?.nativeIdentifier ? { identifier: preferredVoice.nativeIdentifier } : {})
+    };
+
+    return preferredVoice;
+  }
+
+  private async applyReactNativeVoicePreference(): Promise<TtsVoiceOption | null> {
+    const voices = await this.getReactNativeVoiceOptions();
+    const preferredVoice =
+      (this.preferredVoiceId ? voices.find((voice) => voice.id === this.preferredVoiceId) : null) ??
+      voices.find((voice) => /^en(?:-|_)US$/i.test(voice.language) && voice.qualityLabel !== "Network") ??
+      voices.find((voice) => /^en(?:[-_]|$)/i.test(voice.language) && voice.qualityLabel !== "Network") ??
+      voices.find((voice) => /^en(?:[-_]|$)/i.test(voice.language)) ??
+      voices[0] ??
+      null;
+
+    this.selectedVoiceId = preferredVoice?.id ?? null;
+
+    if (preferredVoice?.id) {
+      await this.reactNativeTts?.setDefaultVoice?.(preferredVoice.id).catch(() => true);
+      await this.reactNativeTts?.setDefaultLanguage?.(preferredVoice.language).catch(() => true);
+    } else {
+      await this.reactNativeTts?.setDefaultLanguage?.("en-US").catch(() => true);
+    }
+
+    return preferredVoice;
+  }
+
+  private async getExpoVoiceOptions(): Promise<TtsVoiceOption[]> {
+    const voices = (await this.expoSpeech?.getAvailableVoicesAsync?.().catch(() => [])) ?? [];
+    return voices
+      .map((voice, index) => ({
+        id: voice.identifier ?? `${voice.language ?? "unknown"}:${voice.name ?? index}`,
+        label: voice.name?.trim() || voice.identifier?.trim() || `Voice ${index + 1}`,
+        language: voice.language ?? "unknown",
+        qualityLabel: voice.quality?.trim() || null,
+        backend: "expo-speech" as const,
+        nativeIdentifier: voice.identifier ?? null
+      }))
+      .sort(compareVoiceOptions);
+  }
+
+  private async getReactNativeVoiceOptions(): Promise<TtsVoiceOption[]> {
+    const voices = (await this.reactNativeTts?.voices?.().catch(() => [])) ?? [];
+    return voices
+      .filter((voice) => !voice.notInstalled)
+      .map((voice) => ({
+        id: voice.id,
+        label: voice.name?.trim() || voice.id,
+        language: voice.language,
+        qualityLabel: voice.networkConnectionRequired ? "Network" : voice.quality >= 500 ? "Enhanced" : "Standard",
+        backend: "react-native-tts" as const,
+        nativeIdentifier: voice.id
+      }))
+      .sort(compareVoiceOptions);
+  }
+}
+
+function compareVoiceOptions(left: TtsVoiceOption, right: TtsVoiceOption): number {
+  const leftEnglish = /^en(?:[-_]|$)/i.test(left.language);
+  const rightEnglish = /^en(?:[-_]|$)/i.test(right.language);
+  if (leftEnglish !== rightEnglish) {
+    return leftEnglish ? -1 : 1;
+  }
+
+  if (left.language !== right.language) {
+    return left.language.localeCompare(right.language);
+  }
+
+  return left.label.localeCompare(right.label);
 }

@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, TextInput, View } from "react-native";
+import { Pressable, Text, TextInput, View } from "react-native";
 import type { ChatMessage } from "@adam-connect/shared";
 import { formatMessageTimestamp, humanizeMessageRole, humanizeMessageStatus, splitMessageContent } from "../utils/operatorConsole";
 import { styles } from "./mobileStyles";
@@ -91,7 +91,11 @@ export function VoiceSessionPanel(props: {
   );
 }
 
-export function MessageBubble(props: { message: ChatMessage }): React.JSX.Element {
+export function MessageBubble(props: {
+  message: ChatMessage;
+  actionLabel?: string;
+  onActionPress?(): void;
+}): React.JSX.Element {
   const { message } = props;
   const blocks = splitMessageContent(message.content || message.errorMessage || "...");
 
@@ -122,6 +126,11 @@ export function MessageBubble(props: { message: ChatMessage }): React.JSX.Elemen
         {humanizeMessageStatus(message.status)}
         {message.errorMessage ? ` · ${message.errorMessage}` : ""}
       </Text>
+      {props.actionLabel && props.onActionPress ? (
+        <Pressable style={styles.messageActionButton} onPress={props.onActionPress}>
+          <Text style={styles.messageActionLabel}>{props.actionLabel}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

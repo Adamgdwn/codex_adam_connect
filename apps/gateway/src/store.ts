@@ -6,6 +6,7 @@ import type {
   AuditEvent,
   ChatMessage,
   ChatSession,
+  CreateOutboundRecipientRequest,
   CreateSessionRequest,
   GatewayOverview,
   HostAssistantDeltaRequest,
@@ -20,6 +21,7 @@ import type {
   HostWorkItem,
   NotificationEvent,
   NotificationPrefs,
+  OutboundRecipient,
   PairingCompleteResponse,
   PairedDevice,
   PostMessageRequest,
@@ -32,11 +34,16 @@ import type {
   RepairState,
   RegisteredHost,
   RunState,
+  SendExternalMessageRequest,
+  SendExternalMessageResponse,
   StreamEvent,
   TailscaleStatus,
   UpdateNotificationPrefsRequest,
-  UpdateSessionRequest
+  UpdateSessionRequest,
+  WakeControl
 } from "@adam-connect/shared";
+import { createEmailProvider, renderOutboundEmail, resolveOutboundEmailStatus } from "./outboundEmail.js";
+import { resolveWakeControl } from "./wakeControl.js";
 
 interface HostRecord extends RegisteredHost {
   auth: HostAuthState;
@@ -53,11 +60,14 @@ interface SessionRecord extends ChatSession {
   stopClaimedAt: string | null;
 }
 
+interface OutboundRecipientRecord extends OutboundRecipient {}
+
 interface GatewayState {
   hosts: HostRecord[];
   devices: DeviceRecord[];
   sessions: SessionRecord[];
   messages: ChatMessage[];
+  outboundRecipients: OutboundRecipientRecord[];
   auditEvents: AuditEvent[];
 }
 
@@ -106,6 +116,7 @@ const defaultState = (): GatewayState => ({
   devices: [],
   sessions: [],
   messages: [],
+  outboundRecipients: [],
   auditEvents: []
 });
 
@@ -393,6 +404,147 @@ export class GatewayStore {
     });
     await this.writeState(state);
     return { ok: true, deviceId };
+  }
+
+  async listOutboundRecipients(token: string): Promise<OutboundRecipient[]> {
+    const principal = await this.requireDevice(token);
+    await this.touchDevice(principal.device);
+    return (await this.readState()).outboundRecipients
+      .filter((item) => item.hostId === principal.host.id)
+      .sort((left, right) => left.label.localeCompare(right.label))
+      .map((item) => ({ ...item }));
+  }
+
+  async createOutboundRecipient(token: string, input: CreateOutboundRecipientRequest): Promise<OutboundRecipient> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const label = input.label.trim();
+    const destination = input.destination.trim().toLowerCase();
+    if (!label) {
+      throw new Error("Recipient label is required.");
+    }
+    if (
+      state.outboundRecipients.some(
+        (item) => item.hostId === principal.host.id && item.destination.toLowerCase() === destination
+      )
+    ) {
+      throw new Error("That email recipient already exists.");
+    }
+
+    const recipient: OutboundRecipientRecord = {
+      id: createId("recipient"),
+      hostId: principal.host.id,
+      label,
+      channel: "email",
+      destination,
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    state.outboundRecipients.push(recipient);
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: null,
+      type: "outbound_recipient_added",
+      detail: `${recipient.label} <${recipient.destination}>`
+    });
+    await this.writeState(state);
+    this.emitHostStatus(principal.host);
+    return { ...recipient };
+  }
+
+  async deleteOutboundRecipient(token: string, recipientId: string): Promise<{ ok: true; deletedRecipientId: string }> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const recipient = state.outboundRecipients.find((item) => item.id === recipientId && item.hostId === principal.host.id);
+    if (!recipient) {
+      throw new Error("Recipient not found.");
+    }
+
+    state.outboundRecipients = state.outboundRecipients.filter((item) => item.id !== recipientId);
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: null,
+      type: "outbound_recipient_deleted",
+      detail: `${recipient.label} <${recipient.destination}>`
+    });
+    await this.writeState(state);
+    this.emitHostStatus(principal.host);
+    return { ok: true, deletedRecipientId: recipientId };
+  }
+
+  async sendExternalMessage(token: string, input: SendExternalMessageRequest): Promise<SendExternalMessageResponse> {
+    const principal = await this.requireDevice(token);
+    const state = await this.readState();
+    const provider = createEmailProvider(process.env);
+    const outboundStatus = resolveOutboundEmailStatus(
+      process.env,
+      state.outboundRecipients.filter((item) => item.hostId === principal.host.id).length
+    );
+    if (!provider || !outboundStatus.enabled || !outboundStatus.fromAddress) {
+      throw new Error("Outbound email is not configured on this desktop yet.");
+    }
+
+    const session = state.sessions.find((item) => item.id === input.sessionId && item.hostId === principal.host.id);
+    if (!session) {
+      throw new Error("Chat not found.");
+    }
+
+    const message = state.messages.find((item) => item.id === input.messageId && item.sessionId === session.id);
+    if (!message || message.role !== "assistant" || message.status !== "completed") {
+      throw new Error("Select a completed assistant message before sending externally.");
+    }
+
+    const recipient = state.outboundRecipients.find((item) => item.id === input.recipientId && item.hostId === principal.host.id);
+    if (!recipient) {
+      throw new Error("Recipient not found.");
+    }
+
+    const rendered = renderOutboundEmail({
+      subject: input.subject.trim(),
+      intro: input.intro?.trim() ?? "",
+      messageContent: message.content,
+      sessionTitle: session.title,
+      hostName: principal.host.hostName
+    });
+    let delivery: Awaited<ReturnType<typeof provider.send>>;
+    try {
+      delivery = await provider.send({
+        from: outboundStatus.fromAddress,
+        to: recipient.destination,
+        replyTo: outboundStatus.replyToAddress,
+        subject: input.subject.trim(),
+        text: rendered.text,
+        html: rendered.html
+      });
+    } catch (error) {
+      this.addAuditEvent(state, {
+        hostId: principal.host.id,
+        deviceId: principal.device.id,
+        sessionId: session.id,
+        type: "external_delivery_failed",
+        detail: `${recipient.destination}:${error instanceof Error ? error.message : "unknown_error"}`
+      });
+      await this.writeState(state);
+      throw error;
+    }
+    const deliveredAt = nowIso();
+    this.addAuditEvent(state, {
+      hostId: principal.host.id,
+      deviceId: principal.device.id,
+      sessionId: session.id,
+      type: "external_delivery_sent",
+      detail: `${recipient.destination}:${delivery.provider}:${delivery.deliveryId}`
+    });
+    await this.writeState(state);
+    return {
+      ok: true,
+      deliveryId: delivery.deliveryId,
+      recipient: { ...recipient },
+      channel: recipient.channel,
+      deliveredAt
+    };
   }
 
   async listSessions(token: string): Promise<ChatSession[]> {
@@ -957,11 +1109,14 @@ export class GatewayStore {
 
     const online = isRecent(host.lastSeenAt, 15_000);
     host.isOnline = online;
+    const recipientCount = state.outboundRecipients.filter((item) => item.hostId === hostId).length;
 
     return {
       host: toPublicHost(host),
       auth: host.auth,
       tailscale: host.tailscale,
+      wakeControl: buildWakeControl(process.env, host),
+      outboundEmail: resolveOutboundEmailStatus(process.env, recipientCount),
       availability: deriveHostAvailability(host),
       repairState: deriveRepairState(host),
       runState: deriveRunState(state.sessions, hostId),
@@ -1287,6 +1442,18 @@ function deriveRepairState(host: HostRecord): RepairState {
   return isRecent(host.lastSeenAt, 15_000) ? "healthy" : "reconnecting";
 }
 
+function buildWakeControl(env: NodeJS.ProcessEnv, host: HostRecord): WakeControl {
+  const wakeControl = resolveWakeControl(env);
+  if (!wakeControl.enabled) {
+    return wakeControl;
+  }
+
+  return {
+    ...wakeControl,
+    targetLabel: wakeControl.targetLabel ?? host.hostName
+  };
+}
+
 function deriveRunState(sessions: SessionRecord[], hostId: string): RunState {
   if (sessions.some((item) => item.hostId === hostId && item.status === "stopping")) {
     return "stopping";
@@ -1356,6 +1523,18 @@ function migrateState(input: Partial<GatewayState>): GatewayState {
         responseStyle: record.responseStyle ?? null,
         transcriptPolished: record.transcriptPolished ?? null
       } as ChatMessage;
+    }),
+    outboundRecipients: (input.outboundRecipients ?? []).map((recipient) => {
+      const record = recipient as Partial<OutboundRecipientRecord>;
+      return {
+        id: record.id ?? createId("recipient"),
+        hostId: record.hostId ?? "",
+        label: record.label ?? record.destination ?? "Recipient",
+        channel: "email",
+        destination: record.destination ?? "",
+        createdAt: record.createdAt ?? now,
+        updatedAt: record.updatedAt ?? record.createdAt ?? now
+      } as OutboundRecipientRecord;
     }),
     auditEvents: input.auditEvents ?? []
   };

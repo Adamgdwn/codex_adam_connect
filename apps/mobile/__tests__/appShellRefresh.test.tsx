@@ -18,12 +18,47 @@ const mockStore = {
     host: {
       hostName: "Desktop host",
       isOnline: true,
-      approvedRoots: ["/tmp/workspace"]
+      approvedRoots: ["/tmp/workspace"],
+      id: "host-1",
+      pairingCode: "ABC123",
+      pairingCodeIssuedAt: "2026-04-12T10:00:00.000Z",
+      createdAt: "2026-04-12T10:00:00.000Z",
+      lastSeenAt: "2026-04-12T10:00:00.000Z"
     },
     auth: {
       status: "logged_in",
       detail: "Codex ready"
-    }
+    },
+    tailscale: {
+      installed: true,
+      connected: true,
+      detail: "Connected",
+      dnsName: "desktop.tailnet.ts.net",
+      ipv4: "100.64.0.10",
+      suggestedUrl: "http://desktop.tailnet.ts.net:43111",
+      transportSecurity: "secure",
+      installUrl: "https://tailscale.com/download",
+      loginUrl: "https://login.tailscale.com/start"
+    },
+    wakeControl: {
+      enabled: false,
+      relayBaseUrl: null,
+      relayToken: null,
+      targetId: null,
+      targetLabel: null
+    },
+    outboundEmail: {
+      enabled: false,
+      provider: "none",
+      fromAddress: null,
+      replyToAddress: null,
+      recipientCount: 0
+    },
+    availability: "ready",
+    repairState: "healthy",
+    runState: "ready",
+    activeSessionCount: 0,
+    pairedDeviceCount: 1
   },
   devices: [],
   sessions: [],
@@ -38,6 +73,15 @@ const mockStore = {
   projectOutputType: "implementation plan",
   projectTemplateId: "greenfield",
   responseStyle: "natural",
+  assistantVoices: [],
+  selectedAssistantVoiceId: null,
+  wakeControl: null,
+  wakeRequesting: false,
+  outboundRecipients: [],
+  outboundRecipientLabelDraft: "",
+  outboundRecipientEmailDraft: "",
+  externalDraft: null,
+  sendingExternalMessage: false,
   renameDraftBySession: {},
   autoSpeak: false,
   autoSendVoice: true,
@@ -81,8 +125,16 @@ const mockStore = {
   toggleAutoSpeak: jest.fn(async () => undefined),
   toggleAutoSendVoice: jest.fn(async () => undefined),
   testAssistantVoice: jest.fn(async () => undefined),
+  triggerWakeHomebase: jest.fn(async () => undefined),
+  addOutboundRecipient: jest.fn(async () => undefined),
+  deleteOutboundRecipient: jest.fn(async () => undefined),
+  beginExternalMessageDraft: jest.fn(),
+  cancelExternalMessageDraft: jest.fn(),
+  updateExternalDraft: jest.fn(),
+  sendExternalMessage: jest.fn(async () => undefined),
   toggleListening: jest.fn(async () => undefined),
   setResponseStyle: jest.fn(async () => undefined),
+  selectAssistantVoice: jest.fn(async () => undefined),
   setRenameDraft: jest.fn(),
   setField: jest.fn(),
   setView: jest.fn()

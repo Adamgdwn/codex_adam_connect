@@ -11,6 +11,8 @@
 
 ## Next
 
+- make wake-on-request reliable enough that the homebase can sleep without losing the remote operator path
+- make external report delivery useful and safe with trusted recipients and manual-send email
 - add richer chat readability and management features: previews, timestamps, search, and clearer empty states
 - add richer host settings and reconnect flows
 - improve transcript quality, confirmation for risky voice-send behavior, and TTS cleanup

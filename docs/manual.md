@@ -33,6 +33,8 @@ npm run launch
 ```
 
 - If you want the lower-level terminal-only mode instead, you can still use `npm run dev:desktop-stack`.
+- If you want wake-on-request without keeping the full workstation powered, run the optional wake relay on a low-power LAN node. See [docs/wake-relay-deployment.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/wake-relay-deployment.md).
+- If you want external email delivery, configure Resend in the desktop `.env`. See [docs/outbound-email-setup.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/outbound-email-setup.md).
 
 - For an installable Android APK from this desktop, use:
 
@@ -116,6 +118,7 @@ The chat screen is now intentionally tighter, with a compact top bar, a few smal
 
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
 - `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
+- `Host`: also manages wake-on-request and trusted outbound email recipients.
 - `Chats`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
 - `Chat`: send messages, run the live voice loop, watch streamed replies, and stop active runs.
 
@@ -143,6 +146,9 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - `Stop` also ends the live voice loop on the phone now, so the mic should stop listening immediately when you use it during a voice session.
 - On Android, Adam Connect now asks the recognizer to stop cleanly first, then force-cancels it if needed, so the microphone is less likely to stay latched after a manual stop or while reply audio is starting.
 - Adam Connect now also force-clears Android recognition on app startup and before the spoken-reply test, so stale native listening state is less likely to block reply audio even when the UI already says voice is idle.
+- If the desktop is asleep, use `Host -> Wake Homebase` after you configure the wake relay on the desktop and the always-on LAN node.
+- If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Send externally` on the exact assistant reply you want to send.
+- Outbound email uses the desktop gateway's provider credentials. The phone never stores the sender API key.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use

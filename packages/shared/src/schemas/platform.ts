@@ -21,6 +21,9 @@ export const responseStyleSchema = z.enum(["natural", "executive", "technical", 
 export const notificationEventSchema = z.enum(["run_complete", "run_failed", "repair_needed", "approval_needed"]);
 export const inputModeSchema = z.enum(["text", "voice", "voice_polished"]);
 export const transportSecuritySchema = z.enum(["secure", "insecure", "unknown"]);
+export const outboundProviderSchema = z.enum(["none", "resend"]);
+export const outboundChannelSchema = z.enum(["email"]);
+export const wakeRequestStatusSchema = z.enum(["sent", "awake", "timeout", "error"]);
 
 export const hostAuthStateSchema = z.object({
   status: hostAuthStatusSchema,
@@ -44,6 +47,22 @@ export const notificationPrefsSchema = z.object({
   run_failed: z.boolean(),
   repair_needed: z.boolean(),
   approval_needed: z.boolean()
+});
+
+export const wakeControlSchema = z.object({
+  enabled: z.boolean(),
+  relayBaseUrl: z.string().url().nullable(),
+  relayToken: z.string().nullable(),
+  targetId: z.string().nullable(),
+  targetLabel: z.string().nullable()
+});
+
+export const outboundEmailStatusSchema = z.object({
+  enabled: z.boolean(),
+  provider: outboundProviderSchema,
+  fromAddress: z.string().email().nullable(),
+  replyToAddress: z.string().email().nullable(),
+  recipientCount: z.number().int().nonnegative()
 });
 
 export const registeredHostSchema = z.object({
@@ -116,6 +135,8 @@ export const hostStatusSchema = z.object({
   host: registeredHostSchema,
   auth: hostAuthStateSchema,
   tailscale: tailscaleStatusSchema,
+  wakeControl: wakeControlSchema,
+  outboundEmail: outboundEmailStatusSchema,
   availability: hostAvailabilitySchema,
   repairState: repairStateSchema,
   runState: runStateSchema,
@@ -289,6 +310,59 @@ export const sendTestNotificationRequestSchema = z.object({
   event: notificationEventSchema
 });
 
+export const outboundRecipientSchema = z.object({
+  id: z.string().min(1),
+  hostId: z.string().min(1),
+  label: z.string().min(1),
+  channel: outboundChannelSchema,
+  destination: z.string().email(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const createOutboundRecipientRequestSchema = z.object({
+  label: z.string().min(1).max(120),
+  destination: z.string().email()
+});
+
+export const sendExternalMessageRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  messageId: z.string().min(1),
+  recipientId: z.string().min(1),
+  subject: z.string().min(1).max(160),
+  intro: z.string().max(1200).optional()
+});
+
+export const sendExternalMessageResponseSchema = z.object({
+  ok: z.literal(true),
+  deliveryId: z.string().min(1),
+  recipient: outboundRecipientSchema,
+  channel: outboundChannelSchema,
+  deliveredAt: z.string().datetime()
+});
+
+export const wakeRelayRequestSchema = z.object({
+  targetId: z.string().min(1)
+});
+
+export const wakeRelayResponseSchema = z.object({
+  targetId: z.string().min(1),
+  targetLabel: z.string().min(1),
+  status: wakeRequestStatusSchema,
+  detail: z.string().nullable(),
+  requestedAt: z.string().datetime(),
+  completedAt: z.string().datetime()
+});
+
+export const wakeRelayTargetSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1)
+});
+
+export const wakeRelayTargetsResponseSchema = z.object({
+  targets: z.array(wakeRelayTargetSchema)
+});
+
 export type HostAuthStatus = z.infer<typeof hostAuthStatusSchema>;
 export type ChatSessionStatus = z.infer<typeof chatSessionStatusSchema>;
 export type ChatMessageRole = z.infer<typeof chatMessageRoleSchema>;
@@ -302,9 +376,14 @@ export type ResponseStyle = z.infer<typeof responseStyleSchema>;
 export type NotificationEvent = z.infer<typeof notificationEventSchema>;
 export type InputMode = z.infer<typeof inputModeSchema>;
 export type TransportSecurity = z.infer<typeof transportSecuritySchema>;
+export type OutboundProvider = z.infer<typeof outboundProviderSchema>;
+export type OutboundChannel = z.infer<typeof outboundChannelSchema>;
+export type WakeRequestStatus = z.infer<typeof wakeRequestStatusSchema>;
 export type HostAuthState = z.infer<typeof hostAuthStateSchema>;
 export type TailscaleStatus = z.infer<typeof tailscaleStatusSchema>;
 export type NotificationPrefs = z.infer<typeof notificationPrefsSchema>;
+export type WakeControl = z.infer<typeof wakeControlSchema>;
+export type OutboundEmailStatus = z.infer<typeof outboundEmailStatusSchema>;
 export type RegisteredHost = z.infer<typeof registeredHostSchema>;
 export type PairedDevice = z.infer<typeof pairedDeviceSchema>;
 export type ChatSession = z.infer<typeof chatSessionSchema>;
@@ -336,3 +415,11 @@ export type RenameDeviceRequest = z.infer<typeof renameDeviceRequestSchema>;
 export type RegisterPushTokenRequest = z.infer<typeof registerPushTokenRequestSchema>;
 export type UpdateNotificationPrefsRequest = z.infer<typeof updateNotificationPrefsRequestSchema>;
 export type SendTestNotificationRequest = z.infer<typeof sendTestNotificationRequestSchema>;
+export type OutboundRecipient = z.infer<typeof outboundRecipientSchema>;
+export type CreateOutboundRecipientRequest = z.infer<typeof createOutboundRecipientRequestSchema>;
+export type SendExternalMessageRequest = z.infer<typeof sendExternalMessageRequestSchema>;
+export type SendExternalMessageResponse = z.infer<typeof sendExternalMessageResponseSchema>;
+export type WakeRelayRequest = z.infer<typeof wakeRelayRequestSchema>;
+export type WakeRelayResponse = z.infer<typeof wakeRelayResponseSchema>;
+export type WakeRelayTarget = z.infer<typeof wakeRelayTargetSchema>;
+export type WakeRelayTargetsResponse = z.infer<typeof wakeRelayTargetsResponseSchema>;

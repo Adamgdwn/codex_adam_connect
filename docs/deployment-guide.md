@@ -11,10 +11,13 @@
 1. run governance preflight
 2. run `npm run typecheck`, `npm run build`, `npm run lint`, and `npm test`
 3. verify `codex login status`
-4. start the supported desktop surface with `npm run launch`
-5. optional on Linux: install the desktop-menu launcher with `npm run app:desktop:install-launcher`
-6. pair or repair-connect the phone to that workstation URL
-7. verify the default `Operator` chat is available and the phone can send one text or voice-reviewed turn
+4. if using wake-on-request, deploy the wake relay on an always-on LAN node and verify `/health`
+5. if using outbound email, populate `OUTBOUND_EMAIL_PROVIDER`, `RESEND_API_KEY`, `OUTBOUND_EMAIL_FROM`, and `OUTBOUND_EMAIL_REPLY_TO` in the desktop `.env`
+6. start the supported desktop surface with `npm run launch`
+7. optional on Linux: install the desktop-menu launcher with `npm run app:desktop:install-launcher`
+8. pair or repair-connect the phone to that workstation URL
+9. verify the default `Operator` chat is available and the phone can send one text or voice-reviewed turn
+10. verify wake and external-report flows if enabled
 
 ## Rollback
 
@@ -29,6 +32,8 @@
 - `npm run smoke`
 - manual phone pairing against the real workstation
 - live operator-chat turn from an approved root
+- manual wake from phone while the workstation is asleep
+- manual external email send from a completed assistant reply
 - repair-flow validation using the saved desktop URL and pairing code
 
 ## Checkpoint Status

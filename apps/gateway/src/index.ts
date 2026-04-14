@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import {
+  createOutboundRecipientRequestSchema,
   createSessionRequestSchema,
   hostAssistantDeltaRequestSchema,
   hostCompleteTurnRequestSchema,
@@ -15,6 +16,7 @@ import {
   registerPushTokenRequestSchema,
   registerHostRequestSchema,
   renameDeviceRequestSchema,
+  sendExternalMessageRequestSchema,
   sendTestNotificationRequestSchema,
   updateNotificationPrefsRequestSchema,
   updateSessionRequestSchema
@@ -258,6 +260,29 @@ const server = createServer(async (req, res) => {
       const deviceId = url.pathname.split("/")[2];
       const parsed = sendTestNotificationRequestSchema.parse(await readJson(req));
       sendJson(res, 200, await store.sendTestNotification(readBearer(req), deviceId, parsed.event));
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/outbound/recipients") {
+      sendJson(res, 200, await store.listOutboundRecipients(readBearer(req)));
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/outbound/recipients") {
+      const parsed = createOutboundRecipientRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.createOutboundRecipient(readBearer(req), parsed));
+      return;
+    }
+
+    if (method === "DELETE" && /^\/outbound\/recipients\/[^/]+$/.test(url.pathname)) {
+      const recipientId = url.pathname.split("/")[3];
+      sendJson(res, 200, await store.deleteOutboundRecipient(readBearer(req), recipientId));
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/outbound/send") {
+      const parsed = sendExternalMessageRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.sendExternalMessage(readBearer(req), parsed));
       return;
     }
 

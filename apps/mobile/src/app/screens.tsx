@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform, Pressable, RefreshControl, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { PROJECT_TEMPLATES, humanizeResponseStyle } from "@adam-connect/shared";
 import type { AppState } from "../store/appStore";
+import type { TtsVoiceOption } from "../services/voice/ttsService";
 import { findManualStopTargetSession, findSendTargetSession, findStopTargetSession, formatMessageTimestamp, isOperatorSession, isSessionBusy } from "../utils/operatorConsole";
 import { Banner, LabeledInput, MessageBubble, StatusChip, VoiceSessionPanel } from "./components";
 import { styles } from "./mobileStyles";
@@ -97,6 +98,10 @@ export function HostScreen(props: {
 }): React.JSX.Element {
   const { store, onRefresh, insetBottom } = props;
   const currentDevice = store.devices.find((device) => device.id === store.currentDeviceId) ?? null;
+  const selectedVoice = store.assistantVoices.find((voice) => voice.id === store.selectedAssistantVoiceId) ?? null;
+  const outboundEmail = store.hostStatus?.outboundEmail ?? null;
+  const wakeConfigured = Boolean(store.wakeControl?.enabled);
+  const hostOnline = store.hostStatus?.availability === "ready";
 
   return (
     <ScrollView
@@ -186,11 +191,126 @@ export function HostScreen(props: {
           <Text style={styles.metric}>Auto-send voice turns</Text>
           <Switch value={store.autoSendVoice} onValueChange={() => store.toggleAutoSendVoice().catch((error) => console.warn(error))} />
         </View>
+        <View style={styles.insetCard}>
+          <Text style={styles.inputLabel}>Spoken Reply Voice</Text>
+          <View style={styles.optionGrid}>
+            <Pressable
+              style={[styles.optionChip, !store.selectedAssistantVoiceId ? styles.optionChipActive : null]}
+              onPress={() => store.selectAssistantVoice(null).catch((error) => console.warn(error))}
+            >
+              <Text style={[styles.optionChipLabel, !store.selectedAssistantVoiceId ? styles.optionChipLabelActive : null]}>Automatic</Text>
+            </Pressable>
+            {store.assistantVoices.map((voice) => (
+              <Pressable
+                key={voice.id}
+                style={[styles.optionChip, store.selectedAssistantVoiceId === voice.id ? styles.optionChipActive : null]}
+                onPress={() => store.selectAssistantVoice(voice.id).catch((error) => console.warn(error))}
+              >
+                <Text style={[styles.optionChipLabel, store.selectedAssistantVoiceId === voice.id ? styles.optionChipLabelActive : null]}>
+                  {voice.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.helperText}>
+            {selectedVoice
+              ? `Current spoken reply voice: ${describeVoiceOption(selectedVoice)}.`
+              : "Automatic uses the phone's best available English voice."}
+          </Text>
+        </View>
+        <View style={styles.insetCard}>
+          <Text style={styles.inputLabel}>Reply Style</Text>
+          <View style={styles.optionGrid}>
+            {responseStyles.map((style) => (
+              <Pressable
+                key={style.id}
+                style={[styles.optionChip, store.responseStyle === style.id ? styles.optionChipActive : null]}
+                onPress={() => store.setResponseStyle(style.id).catch((error) => console.warn(error))}
+              >
+                <Text style={[styles.optionChipLabel, store.responseStyle === style.id ? styles.optionChipLabelActive : null]}>
+                  {style.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.helperText}>
+            Voice turns and typed sends will use a {humanizeResponseStyle(store.responseStyle)} reply style.
+          </Text>
+        </View>
         <View style={styles.actions}>
           <Pressable style={styles.secondaryButton} onPress={() => store.testAssistantVoice().catch((error) => console.warn(error))}>
             <Text style={styles.secondaryLabel}>Test Spoken Reply</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Wake Homebase</Text>
+        <Text style={styles.supportingText}>
+          {wakeConfigured
+            ? hostOnline
+              ? `${store.wakeControl?.targetLabel ?? "Homebase"} is online. Use wake-on-request when the desktop is asleep and you want Adam Connect back without running the full workstation constantly.`
+              : `Wake relay is configured for ${store.wakeControl?.targetLabel ?? "Homebase"}. Tap this when the desktop is asleep and you want the operator console back.`
+            : "Wake-on-request is not configured on this desktop yet."}
+        </Text>
+        {wakeConfigured ? (
+          <Pressable
+            style={[styles.primaryButton, store.wakeRequesting ? styles.disabledButton : null]}
+            disabled={store.wakeRequesting}
+            onPress={() => store.triggerWakeHomebase().catch((error) => console.warn(error))}
+          >
+            <Text style={styles.primaryLabel}>{store.wakeRequesting ? "Waking..." : "Wake Homebase"}</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.helperText}>
+            Add `WAKE_RELAY_BASE_URL`, `WAKE_RELAY_TOKEN`, and `WAKE_RELAY_TARGET_ID` to the desktop `.env`, then refresh this screen.
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>External Reports</Text>
+        <Text style={styles.supportingText}>
+          {outboundEmail?.enabled
+            ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Send externally on a completed Codex reply to email it outside Adam Connect.`
+            : "External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside Adam Connect."}
+        </Text>
+        <Text style={styles.metric}>
+          Provider: {outboundEmail?.provider ?? "none"} | Trusted recipients: {store.outboundRecipients.length}
+        </Text>
+        <LabeledInput
+          label="Recipient Label"
+          value={store.outboundRecipientLabelDraft}
+          onChange={(value) => store.setField("outboundRecipientLabelDraft", value)}
+          autoCapitalize="sentences"
+          placeholder="Weekly report, Adam, client ops..."
+        />
+        <LabeledInput
+          label="Recipient Email"
+          value={store.outboundRecipientEmailDraft}
+          onChange={(value) => store.setField("outboundRecipientEmailDraft", value)}
+          autoCapitalize="none"
+          placeholder="name@example.com"
+        />
+        <Pressable style={styles.secondaryButton} onPress={() => store.addOutboundRecipient().catch((error) => console.warn(error))}>
+          <Text style={styles.secondaryLabel}>Add Trusted Recipient</Text>
+        </Pressable>
+        {store.outboundRecipients.length ? (
+          store.outboundRecipients.map((recipient) => (
+            <View key={recipient.id} style={styles.insetCard}>
+              <Text style={styles.metric}>{recipient.label}</Text>
+              <Text style={styles.supportingText}>{recipient.destination}</Text>
+              <Pressable
+                style={[styles.secondaryButton, styles.dangerButton]}
+                onPress={() => store.deleteOutboundRecipient(recipient.id).catch((error) => console.warn(error))}
+              >
+                <Text style={[styles.secondaryLabel, styles.dangerButtonLabel]}>Remove Recipient</Text>
+              </Pressable>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.helperText}>No trusted outbound recipients yet.</Text>
+        )}
       </View>
 
       <View style={styles.card}>
@@ -465,6 +585,13 @@ export function ChatScreen(props: {
   const canRequestStop = Boolean(manualStopTargetSession || store.voiceSessionActive || store.voiceAssistantDraft);
   const lastMessage = messages[messages.length - 1] ?? null;
   const lastMessageSnapshot = lastMessage ? `${lastMessage.id}:${lastMessage.status}:${lastMessage.updatedAt}:${lastMessage.content.length}` : "empty";
+  const selectedExternalMessage =
+    store.externalDraft && store.externalDraft.sessionId === store.selectedSessionId
+      ? messages.find((item) => item.id === store.externalDraft?.messageId) ?? null
+      : null;
+  const canSendExternal = Boolean(
+    store.externalDraft?.recipientId && store.externalDraft?.subject.trim() && !store.sendingExternalMessage
+  );
   const scrollRef = useRef<ScrollView | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const showChatChrome = !selectedSession || Boolean(selectedSession.lastError) || (!hasSelectedSession && hasFallbackSession);
@@ -546,11 +673,85 @@ export function ChatScreen(props: {
         />
 
         <View style={styles.messages}>
-          {messages.length > 0 ? messages.map((item) => <MessageBubble key={item.id} message={item} />) : <Text style={styles.metric}>Open a chat to see message history.</Text>}
+          {messages.length > 0 ? (
+            messages.map((item) => (
+              <MessageBubble
+                key={item.id}
+                message={item}
+                actionLabel={item.role === "assistant" && item.status === "completed" ? "Send externally" : undefined}
+                onActionPress={
+                  item.role === "assistant" && item.status === "completed"
+                    ? () => store.beginExternalMessageDraft(item.id, item.sessionId)
+                    : undefined
+                }
+              />
+            ))
+          ) : (
+            <Text style={styles.metric}>Open a chat to see message history.</Text>
+          )}
         </View>
       </ScrollView>
 
       <View style={[styles.card, styles.chatComposerCard, { marginBottom: composerBottomPadding + keyboardInset }]}>
+        {store.externalDraft ? (
+          <View style={styles.insetCard}>
+            <Text style={styles.sectionTitle}>Send Externally</Text>
+            <Text style={styles.supportingText}>
+              {selectedExternalMessage
+                ? `You are sending a completed Codex reply from this chat to a trusted email recipient.`
+                : "Select a completed Codex reply before sending it externally."}
+            </Text>
+            {selectedExternalMessage ? (
+              <Text style={styles.helperText} numberOfLines={3}>
+                {selectedExternalMessage.content.trim().replace(/\s+/g, " ")}
+              </Text>
+            ) : null}
+            <View style={styles.optionGrid}>
+              {store.outboundRecipients.map((recipient) => (
+                <Pressable
+                  key={recipient.id}
+                  style={[styles.optionChip, store.externalDraft?.recipientId === recipient.id ? styles.optionChipActive : null]}
+                  onPress={() => store.updateExternalDraft("recipientId", recipient.id)}
+                >
+                  <Text
+                    style={[styles.optionChipLabel, store.externalDraft?.recipientId === recipient.id ? styles.optionChipLabelActive : null]}
+                  >
+                    {recipient.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {!store.outboundRecipients.length ? (
+              <Text style={styles.helperText}>Add at least one trusted recipient on the Host tab first.</Text>
+            ) : null}
+            <LabeledInput
+              label="Email Subject"
+              value={store.externalDraft.subject}
+              onChange={(value) => store.updateExternalDraft("subject", value)}
+              autoCapitalize="sentences"
+            />
+            <LabeledInput
+              label="Intro"
+              value={store.externalDraft.intro}
+              onChange={(value) => store.updateExternalDraft("intro", value)}
+              autoCapitalize="sentences"
+              multiline
+              placeholder="Optional note before the Codex output..."
+            />
+            <View style={styles.actions}>
+              <Pressable style={styles.secondaryButton} onPress={() => store.cancelExternalMessageDraft()}>
+                <Text style={styles.secondaryLabel}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.primaryButton, !canSendExternal ? styles.disabledButton : null]}
+                disabled={!canSendExternal}
+                onPress={() => store.sendExternalMessage().catch((error) => console.warn(error))}
+              >
+                <Text style={styles.primaryLabel}>{store.sendingExternalMessage ? "Sending..." : "Send Email"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         <TextInput
           value={store.composer}
           onChangeText={(value) => store.setField("composer", value)}
@@ -664,4 +865,13 @@ function humanizeSessionKind(kind: "operator" | "project" | "admin" | "build" | 
     default:
       return "Project";
   }
+}
+
+function describeVoiceOption(voice: TtsVoiceOption): string {
+  const details = [voice.language];
+  if (voice.qualityLabel) {
+    details.push(voice.qualityLabel);
+  }
+
+  return `${voice.label} (${details.join(" • ")})`;
 }

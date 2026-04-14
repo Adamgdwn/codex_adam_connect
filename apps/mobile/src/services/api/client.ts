@@ -1,15 +1,19 @@
 import type {
   ChatMessage,
   ChatSession,
+  CreateOutboundRecipientRequest,
   CreateSessionRequest,
   HostStatus,
   NotificationEvent,
+  OutboundRecipient,
   PairingCompleteResponse,
   PairedDevice,
   PostMessageRequest,
   RegisterPushTokenRequest,
   RealtimeTicketResponse,
   RenameDeviceRequest,
+  SendExternalMessageRequest,
+  SendExternalMessageResponse,
   UpdateNotificationPrefsRequest,
   UpdateSessionRequest
 } from "@adam-connect/shared";
@@ -90,6 +94,30 @@ export class ApiClient {
 
   sendTestNotification(token: string, baseUrl: string, deviceId: string, event: NotificationEvent): Promise<{ ok: true; deviceId: string }> {
     return this.request("POST", `${baseUrl}/devices/${encodeURIComponent(deviceId)}/test-notification`, token, { event });
+  }
+
+  listOutboundRecipients(token: string, baseUrl: string): Promise<OutboundRecipient[]> {
+    return this.request("GET", `${baseUrl}/outbound/recipients`, token);
+  }
+
+  createOutboundRecipient(
+    token: string,
+    baseUrl: string,
+    input: CreateOutboundRecipientRequest
+  ): Promise<OutboundRecipient> {
+    return this.request("POST", `${baseUrl}/outbound/recipients`, token, input);
+  }
+
+  deleteOutboundRecipient(token: string, baseUrl: string, recipientId: string): Promise<{ ok: true; deletedRecipientId: string }> {
+    return this.request("DELETE", `${baseUrl}/outbound/recipients/${encodeURIComponent(recipientId)}`, token);
+  }
+
+  sendExternalMessage(
+    token: string,
+    baseUrl: string,
+    input: SendExternalMessageRequest
+  ): Promise<SendExternalMessageResponse> {
+    return this.request("POST", `${baseUrl}/outbound/send`, token, input);
   }
 
   private async request<T>(method: string, url: string, token?: string, body?: unknown): Promise<T> {

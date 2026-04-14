@@ -215,6 +215,15 @@ export const styles = StyleSheet.create({
   },
   messageCodeText: { color: "#e2e8f0", fontFamily: "monospace", lineHeight: 20 },
   messageMeta: { color: "#64748b", fontSize: 12 },
+  messageActionButton: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+    backgroundColor: "#dbeafe",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  messageActionLabel: { color: "#1d4ed8", fontWeight: "800", fontSize: 12 },
   composer: {
     minHeight: 72,
     textAlignVertical: "top",

@@ -2,6 +2,7 @@
 
 Adam Connect turns a paired phone into a remote chat surface for the local Codex CLI running on this computer.
 It now also supports a natural-feeling live voice loop, so your desktop coding partner can actually feel like it is in your pocket instead of trapped behind a one-shot mic button.
+It also now supports wake-on-request through a tiny LAN relay and manual outbound email of completed Codex replies, so the homebase can sleep when idle and still send polished updates outside the chat tunnel when you choose.
 
 ## Status Snapshot
 
@@ -45,6 +46,8 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 - the mobile app now runs a continuous voice session loop with live transcript, early spoken playback, and barge-in handling on top of the existing websocket transport
 - Android voice playback now pauses recognition while spoken replies start, then resumes the voice loop automatically for the next turn
 - Android spoken replies now prefer Expo speech output first, then fall back to the older Android text-to-speech module if needed
+- the phone can now cache a wake-scoped relay config so it can wake the workstation even when the main gateway is offline
+- completed assistant replies can now be sent externally by email through gateway-local Resend credentials and trusted recipient records
 
 ## Known Issues
 
@@ -179,10 +182,15 @@ On Android, Adam Connect now prefers Expo speech for reply audio and keeps the o
 - optionally set `MOBILE_DEFAULT_BASE_URL` to prefill the desktop URL in local mobile builds
 - optionally tune the voice loop:
   `MOBILE_VOICE_SESSION_ENABLED`, `MOBILE_VOICE_INTERRUPT_MIN_CHARS`, `MOBILE_VOICE_BACKCHANNEL_MAX_WORDS`, `MOBILE_VOICE_TTS_MIN_CHARS`
+- optional wake relay on a low-power LAN node:
+  `WAKE_RELAY_BASE_URL`, `WAKE_RELAY_TOKEN`, `WAKE_RELAY_TARGET_ID`, `WAKE_RELAY_TARGET_LABEL`, `WAKE_RELAY_TARGETS_JSON`
+- optional outbound email from the desktop gateway:
+  `OUTBOUND_EMAIL_PROVIDER`, `RESEND_API_KEY`, `OUTBOUND_EMAIL_FROM`, `OUTBOUND_EMAIL_REPLY_TO`
 - optional for Android background updates: add `apps/mobile/android/app/google-services.json` and set `FCM_SERVER_KEY`
 - launch the desktop app with `npm run launch`
 - the launcher opens the native shell when a GUI session is available
 - optional on Linux: install a menu launcher with `npm run app:desktop:install-launcher`
+- optional on the wake relay machine: run `npm run dev:wake-relay`
 - start the mobile bundler with `npm run dev:mobile`
 - run the mobile app from `apps/mobile`
 
@@ -192,3 +200,4 @@ The current product priority is to make the phone feel like a persistent remote 
 
 Use [START_HERE.md](/home/adamgoodwin/code/agents/codex_adam_connect/START_HERE.md) for the exact setup and validation order.
 See [docs/voice-realtime-architecture.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/voice-realtime-architecture.md) for the voice upgrade assessment and implementation note.
+See [docs/wake-relay-deployment.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/wake-relay-deployment.md) for the low-power wake setup and [docs/outbound-email-setup.md](/home/adamgoodwin/code/agents/codex_adam_connect/docs/outbound-email-setup.md) for the Resend sender configuration.

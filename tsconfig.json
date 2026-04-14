@@ -5,6 +5,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/provider-adapters" },
     { "path": "./apps/gateway" },
+    { "path": "./apps/wake-relay" },
     { "path": "./apps/desktop-extension" },
     { "path": "./apps/desktop-shell" }
   ]

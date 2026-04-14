@@ -45,6 +45,31 @@ jest.mock('expo-speech-recognition', () => {
 jest.mock('react-native-tts', () => ({
   default: {
     getInitStatus: jest.fn(async () => 'success'),
+    engines: jest.fn(async () => [
+      {name: 'default-engine', label: 'Default Engine', default: true, icon: 0},
+    ]),
+    voices: jest.fn(async () => [
+      {
+        id: 'en-us-standard',
+        name: 'English US Standard',
+        language: 'en-US',
+        quality: 300,
+        latency: 100,
+        networkConnectionRequired: false,
+        notInstalled: false,
+      },
+      {
+        id: 'en-gb-enhanced',
+        name: 'English UK Enhanced',
+        language: 'en-GB',
+        quality: 500,
+        latency: 80,
+        networkConnectionRequired: false,
+        notInstalled: false,
+      },
+    ]),
+    setDefaultEngine: jest.fn(async () => true),
+    setDefaultVoice: jest.fn(async () => 'success'),
     setDefaultLanguage: jest.fn(async () => 'success'),
     setDefaultRate: jest.fn(async () => 'success'),
     setDucking: jest.fn(async () => 'success'),

@@ -9,6 +9,10 @@
 - stopped the dashboard APK install links from opening a useless blank browser tab by turning them into direct downloads with explicit Android attachment headers
 - made live voice turns less trigger-happy on short pauses by buffering a finalized transcript briefly and merging immediate continuation speech into the same turn
 - added a device-side `Test Spoken Reply` control and richer Android TTS engine/voice diagnostics so reply-audio failures can be separated from live voice-loop bugs
+- added a mobile spoken-reply voice picker plus a more accessible global reply-style control so voice behavior can be tuned without leaving the operator console
+- added a wake-on-request path using a separate always-on LAN wake relay so the workstation can sleep without killing the remote operator path
+- added trusted outbound email recipients plus a `Send externally` flow that reuses completed assistant replies without making a fresh model call
+- added Resend-based outbound email configuration, a wake relay deployment doc, and explicit desktop `.env` hooks for both features
 - made the chat `Stop` action behave like a recovery control as well as a busy-run interrupt, so users can stop or reset the best available chat even when mobile session state has drifted
 - made the chat `Stop` action end the live phone-side voice loop as well, so manual stop no longer leaves the microphone listening in the background
 - hardened Android recognizer shutdown by requesting a clean `stop()` before forcing an `abort()`, which should reduce stuck-listening and audio-focus conflicts during spoken replies

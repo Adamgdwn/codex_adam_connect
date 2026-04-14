@@ -1,6 +1,7 @@
 import type {
   ChatMessage,
   ChatSession,
+  CreateOutboundRecipientRequest,
   CreateSessionRequest,
   HostAssistantDeltaRequest,
   HostCompleteTurnRequest,
@@ -10,13 +11,16 @@ import type {
   HostStartTurnRequest,
   HostStatus,
   HostWorkItem,
+  OutboundRecipient,
   PairingCompleteResponse,
   PairedDevice,
   PostMessageRequest,
   RealtimeTicketResponse,
   RegisterPushTokenRequest,
   RegisterHostRequest,
-  RegisterHostResponse
+  RegisterHostResponse,
+  SendExternalMessageRequest,
+  SendExternalMessageResponse
 } from "../schemas/platform.js";
 import type {
   NotificationEvent,
@@ -42,6 +46,10 @@ export interface MobileApi {
   registerPushToken(token: string, deviceId: string, input: RegisterPushTokenRequest): Promise<PairedDevice>;
   updateNotificationPrefs(token: string, deviceId: string, input: UpdateNotificationPrefsRequest): Promise<PairedDevice>;
   sendTestNotification(token: string, deviceId: string, event: NotificationEvent): Promise<{ ok: true; deviceId: string }>;
+  listOutboundRecipients(token: string): Promise<OutboundRecipient[]>;
+  createOutboundRecipient(token: string, input: CreateOutboundRecipientRequest): Promise<OutboundRecipient>;
+  deleteOutboundRecipient(token: string, recipientId: string): Promise<{ ok: true; deletedRecipientId: string }>;
+  sendExternalMessage(token: string, input: SendExternalMessageRequest): Promise<SendExternalMessageResponse>;
 }
 
 export interface HostApi {

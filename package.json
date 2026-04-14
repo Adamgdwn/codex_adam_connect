@@ -24,6 +24,7 @@
     "dev:desktop-stack": "node scripts/dev-desktop-stack.mjs",
     "dev:gateway": "npm run dev --workspace @adam-connect/gateway",
     "dev:mobile": "npm run start --workspace @adam-connect/mobile",
+    "dev:wake-relay": "npm run dev --workspace @adam-connect/wake-relay",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
