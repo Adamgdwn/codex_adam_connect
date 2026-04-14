@@ -12,6 +12,8 @@
 - added a mobile spoken-reply voice picker plus a more accessible global reply-style control so voice behavior can be tuned without leaving the operator console
 - added a wake-on-request path using a separate always-on LAN wake relay so the workstation can sleep without killing the remote operator path
 - added trusted outbound email recipients plus a `Send externally` flow that reuses completed assistant replies without making a fresh model call
+- added a confirmation-based natural email path so spoken requests like “email me that link” can prepare an outbound draft automatically and wait for a final spoken or tapped confirmation before sending
+- added a spinning in-chat working bubble so long-running turns are visibly active instead of feeling hung
 - added Resend-based outbound email configuration, a wake relay deployment doc, and explicit desktop `.env` hooks for both features
 - removed the idle `Voice Loop` chat panel so it only takes space when a live voice session or spoken draft is actually active, and clarified that newly-added outbound email env vars require a desktop restart before the phone will see them
 - made the chat `Stop` action behave like a recovery control as well as a busy-run interrupt, so users can stop or reset the best available chat even when mobile session state has drifted

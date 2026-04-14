@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Pressable, Text, TextInput, View } from "react-native";
 import type { ChatMessage } from "@adam-connect/shared";
 import { formatMessageTimestamp, humanizeMessageRole, humanizeMessageStatus, splitMessageContent } from "../utils/operatorConsole";
 import { styles } from "./mobileStyles";
@@ -131,6 +131,42 @@ export function MessageBubble(props: {
           <Text style={styles.messageActionLabel}>{props.actionLabel}</Text>
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+export function WorkingBubble(props: { label: string }): React.JSX.Element {
+  const spin = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.linear,
+        useNativeDriver: true
+      })
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [spin]);
+
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"]
+  });
+
+  return (
+    <View style={[styles.messageBubble, styles.assistantBubble, styles.workingBubble]}>
+      <View style={styles.workingBubbleRow}>
+        <Animated.View style={[styles.workingGlyphWrap, { transform: [{ rotate }] }]}>
+          <Text style={styles.workingGlyph}>☢</Text>
+        </Animated.View>
+        <View style={styles.workingCopy}>
+          <Text style={styles.messageRole}>Adam Connect Working</Text>
+          <Text style={styles.helperText}>{props.label}</Text>
+        </View>
+      </View>
     </View>
   );
 }

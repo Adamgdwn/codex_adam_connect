@@ -224,6 +224,18 @@ export const styles = StyleSheet.create({
     paddingVertical: 8
   },
   messageActionLabel: { color: "#1d4ed8", fontWeight: "800", fontSize: 12 },
+  workingBubble: { backgroundColor: "#fff7ed", borderColor: "rgba(146,64,14,0.12)" },
+  workingBubbleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  workingGlyphWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: "#fef3c7",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  workingGlyph: { fontSize: 20, color: "#c2410c", fontWeight: "800" },
+  workingCopy: { flex: 1, gap: 2 },
   composer: {
     minHeight: 72,
     textAlignVertical: "top",

@@ -496,7 +496,21 @@ export class GatewayStore {
       throw new Error("Select a completed assistant message before sending externally.");
     }
 
-    const recipient = state.outboundRecipients.find((item) => item.id === input.recipientId && item.hostId === principal.host.id);
+    const recipient =
+      (input.recipientId
+        ? state.outboundRecipients.find((item) => item.id === input.recipientId && item.hostId === principal.host.id)
+        : null) ??
+      (input.recipientDestination
+        ? {
+            id: createId("recipient"),
+            hostId: principal.host.id,
+            label: input.recipientLabel?.trim() || input.recipientDestination.trim(),
+            channel: "email" as const,
+            destination: input.recipientDestination.trim(),
+            createdAt: nowIso(),
+            updatedAt: nowIso()
+          }
+        : null);
     if (!recipient) {
       throw new Error("Recipient not found.");
     }

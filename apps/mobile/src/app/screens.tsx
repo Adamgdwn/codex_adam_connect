@@ -3,8 +3,9 @@ import { Linking, Platform, Pressable, RefreshControl, ScrollView, Switch, Text,
 import { PROJECT_TEMPLATES, humanizeResponseStyle } from "@adam-connect/shared";
 import type { AppState } from "../store/appStore";
 import type { TtsVoiceOption } from "../services/voice/ttsService";
+import { isValidExternalEmail } from "../utils/externalSend";
 import { findManualStopTargetSession, findSendTargetSession, findStopTargetSession, formatMessageTimestamp, isOperatorSession, isSessionBusy } from "../utils/operatorConsole";
-import { Banner, LabeledInput, MessageBubble, StatusChip, VoiceSessionPanel } from "./components";
+import { Banner, LabeledInput, MessageBubble, StatusChip, VoiceSessionPanel, WorkingBubble } from "./components";
 import { styles } from "./mobileStyles";
 
 const keyboardDismissMode: "interactive" | "on-drag" = Platform.OS === "ios" ? "interactive" : "on-drag";
@@ -272,7 +273,7 @@ export function HostScreen(props: {
         <Text style={styles.sectionTitle}>External Reports</Text>
         <Text style={styles.supportingText}>
           {outboundEmail?.enabled
-            ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Send externally on a completed Codex reply to email it outside Adam Connect.`
+            ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Email this reply on a completed Codex message, or ask naturally by voice and confirm before send.`
             : store.hostStatus
               ? "External email is not ready in the running desktop process yet. If you just added the Resend env vars, restart Adam Connect on the desktop and refresh this screen."
               : "External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside Adam Connect."}
@@ -592,7 +593,9 @@ export function ChatScreen(props: {
       ? messages.find((item) => item.id === store.externalDraft?.messageId) ?? null
       : null;
   const canSendExternal = Boolean(
-    store.externalDraft?.recipientId && store.externalDraft?.subject.trim() && !store.sendingExternalMessage
+    store.externalDraft?.subject.trim() &&
+      (store.externalDraft?.recipientId || isValidExternalEmail(store.externalDraft?.recipientDestination ?? "")) &&
+      !store.sendingExternalMessage
   );
   const scrollRef = useRef<ScrollView | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
@@ -682,7 +685,7 @@ export function ChatScreen(props: {
               <MessageBubble
                 key={item.id}
                 message={item}
-                actionLabel={item.role === "assistant" && item.status === "completed" ? "Send externally" : undefined}
+                actionLabel={item.role === "assistant" && item.status === "completed" ? "Email this reply" : undefined}
                 onActionPress={
                   item.role === "assistant" && item.status === "completed"
                     ? () => store.beginExternalMessageDraft(item.id, item.sessionId)
@@ -693,6 +696,15 @@ export function ChatScreen(props: {
           ) : (
             <Text style={styles.metric}>Open a chat to see message history.</Text>
           )}
+          {busy || store.sendingMessage ? (
+            <WorkingBubble
+              label={
+                store.sendingMessage
+                  ? "Adam Connect is sending your turn to the desktop."
+                  : "Adam Connect is still working on this turn. You can wait, interrupt, or say a new turn."
+              }
+            />
+          ) : null}
         </View>
       </ScrollView>
 
@@ -702,7 +714,9 @@ export function ChatScreen(props: {
             <Text style={styles.sectionTitle}>Send Externally</Text>
             <Text style={styles.supportingText}>
               {selectedExternalMessage
-                ? `You are sending a completed Codex reply from this chat to a trusted email recipient.`
+                ? store.externalDraft.confirmationRequired
+                  ? "Adam Connect prepared this email draft from your conversation and is waiting for a final confirmation before it sends."
+                  : `You are sending a completed Codex reply from this chat to an email recipient.`
                 : "Select a completed Codex reply before sending it externally."}
             </Text>
             {selectedExternalMessage ? (
@@ -728,6 +742,16 @@ export function ChatScreen(props: {
             {!store.outboundRecipients.length ? (
               <Text style={styles.helperText}>Add at least one trusted recipient on the Host tab first.</Text>
             ) : null}
+            {store.externalDraft.confirmationRequired ? (
+              <Text style={styles.helperText}>You can confirm by voice with “yes, send it” or cancel with “cancel”.</Text>
+            ) : null}
+            <LabeledInput
+              label="Recipient Email"
+              value={store.externalDraft.recipientDestination}
+              onChange={(value) => store.updateExternalDraft("recipientDestination", value)}
+              autoCapitalize="none"
+              placeholder="name@example.com"
+            />
             <LabeledInput
               label="Email Subject"
               value={store.externalDraft.subject}

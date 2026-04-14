@@ -10,6 +10,8 @@ export class AssistantSpeechRuntime {
   private pendingStart = false;
   private speechSpanActive = false;
   private speakStartTimer: ReturnType<typeof setTimeout> | null = null;
+  private currentChunk: string | null = null;
+  private alternateBackendAttempted = false;
   private handlers: {
     onBeforeSpeak?(): void;
     onSpeakingChange(speaking: boolean): void;
@@ -39,6 +41,8 @@ export class AssistantSpeechRuntime {
         this.clearStartTimer();
         this.pendingStart = false;
         this.speaking = false;
+        this.currentChunk = null;
+        this.alternateBackendAttempted = false;
         if (this.queue.length > 0) {
           this.flushQueue();
           return;
@@ -52,6 +56,8 @@ export class AssistantSpeechRuntime {
         this.pendingStart = false;
         this.speaking = false;
         this.speechSpanActive = false;
+        this.currentChunk = null;
+        this.alternateBackendAttempted = false;
         handlers.onSpeakingChange(false);
       },
       onError: (message) => {
@@ -59,6 +65,8 @@ export class AssistantSpeechRuntime {
         this.pendingStart = false;
         this.speaking = false;
         this.speechSpanActive = false;
+        this.currentChunk = null;
+        this.alternateBackendAttempted = false;
         handlers.onSpeakingChange(false);
         handlers.onSpeechError?.(message);
       }
@@ -72,6 +80,8 @@ export class AssistantSpeechRuntime {
     this.speaking = false;
     this.pendingStart = false;
     this.speechSpanActive = false;
+    this.currentChunk = null;
+    this.alternateBackendAttempted = false;
     this.clearStartTimer();
     this.tts.stop();
   }
@@ -81,6 +91,8 @@ export class AssistantSpeechRuntime {
     this.speaking = false;
     this.pendingStart = false;
     this.speechSpanActive = false;
+    this.currentChunk = null;
+    this.alternateBackendAttempted = false;
     this.clearStartTimer();
     this.tts.stop();
   }
@@ -120,9 +132,12 @@ export class AssistantSpeechRuntime {
 
     this.handlers?.onBeforeSpeak?.();
     this.pendingStart = true;
+    this.currentChunk = next;
+    this.alternateBackendAttempted = false;
     const spoken = this.tts.speak(next);
     if (!spoken) {
       this.pendingStart = false;
+      this.currentChunk = null;
       this.flushQueue();
       return;
     }
@@ -138,9 +153,21 @@ export class AssistantSpeechRuntime {
         return;
       }
 
+      const alternateRetryWorked =
+        this.currentChunk &&
+        !this.alternateBackendAttempted &&
+        (this.tts as TtsService & { retryWithAlternateBackend?(text: string): boolean }).retryWithAlternateBackend?.(this.currentChunk);
+      if (alternateRetryWorked) {
+        this.alternateBackendAttempted = true;
+        this.armStartTimeout();
+        return;
+      }
+
       this.pendingStart = false;
       this.speaking = false;
       this.speechSpanActive = false;
+      this.currentChunk = null;
+      this.alternateBackendAttempted = false;
       this.handlers?.onSpeakingChange(false);
       this.handlers?.onSpeechError?.("Spoken replies could not start on this phone. Check Android text-to-speech output and media volume.");
       this.flushQueue();

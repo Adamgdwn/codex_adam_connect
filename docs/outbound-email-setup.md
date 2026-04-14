@@ -38,7 +38,7 @@ Do not put a Google mailbox password in the repo or in Adam Connect config.
 2. Open `Host -> External Reports`.
 3. Add one or more trusted recipient email addresses.
 4. In chat, open a completed assistant reply.
-5. Tap `Send externally`.
+5. Tap `Email this reply`, or ask for the email naturally in voice and confirm when Adam Connect prepares the draft.
 6. Choose the recipient, edit subject/intro, and send.
 
 ## Validation

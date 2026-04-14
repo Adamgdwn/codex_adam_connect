@@ -328,9 +328,14 @@ export const createOutboundRecipientRequestSchema = z.object({
 export const sendExternalMessageRequestSchema = z.object({
   sessionId: z.string().min(1),
   messageId: z.string().min(1),
-  recipientId: z.string().min(1),
+  recipientId: z.string().min(1).optional(),
+  recipientDestination: z.string().email().optional(),
+  recipientLabel: z.string().min(1).max(120).optional(),
   subject: z.string().min(1).max(160),
   intro: z.string().max(1200).optional()
+}).refine((value) => Boolean(value.recipientId || value.recipientDestination), {
+  message: "Choose a stored recipient or provide an email destination.",
+  path: ["recipientId"]
 });
 
 export const sendExternalMessageResponseSchema = z.object({

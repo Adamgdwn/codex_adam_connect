@@ -147,8 +147,11 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - On Android, Adam Connect now asks the recognizer to stop cleanly first, then force-cancels it if needed, so the microphone is less likely to stay latched after a manual stop or while reply audio is starting.
 - Adam Connect now also force-clears Android recognition on app startup and before the spoken-reply test, so stale native listening state is less likely to block reply audio even when the UI already says voice is idle.
 - If the desktop is asleep, use `Host -> Wake Homebase` after you configure the wake relay on the desktop and the always-on LAN node.
-- If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Send externally` on the exact assistant reply you want to send.
+- If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Email this reply` on the exact assistant message you want to send.
+- Adam Connect can also detect a natural spoken email request such as “email me that link” or “email this to name@example.com”, prepare the draft when the reply finishes, and wait for a final confirmation before it sends.
+- When an email draft is waiting, you can confirm by voice with `yes, send it` or cancel with `cancel`.
 - Outbound email uses the desktop gateway's provider credentials. The phone never stores the sender API key.
+- The chat view now shows a spinning working bubble while Adam Connect is still sending or waiting on a turn, so it is easier to tell the difference between “busy” and “hung”.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use

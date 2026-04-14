@@ -44,6 +44,13 @@ import {
   sortSessionsForDisplay
 } from "../utils/operatorConsole";
 import {
+  isExternalSendCancellation,
+  isExternalSendConfirmation,
+  isValidExternalEmail,
+  parseExternalSendRequest,
+  type ParsedExternalSendRequest
+} from "../utils/externalSend";
+import {
   type VoiceSessionPhase,
   mergeVoiceTranscriptSegments,
   normalizeVoiceTranscript,
@@ -80,8 +87,20 @@ interface ExternalDraftState {
   sessionId: string;
   messageId: string;
   recipientId: string | null;
+  recipientLabel: string | null;
+  recipientDestination: string;
   subject: string;
   intro: string;
+  confirmationRequired: boolean;
+}
+
+interface PendingExternalRequestState {
+  sessionId: string;
+  userMessageId: string;
+  recipientId: string | null;
+  recipientLabel: string | null;
+  recipientDestination: string;
+  requestedByVoice: boolean;
 }
 
 export interface AppState {
@@ -117,6 +136,7 @@ export interface AppState {
   outboundRecipientLabelDraft: string;
   outboundRecipientEmailDraft: string;
   externalDraft: ExternalDraftState | null;
+  pendingExternalRequest: PendingExternalRequestState | null;
   sendingExternalMessage: boolean;
   renameDraftBySession: Record<string, string>;
   autoSpeak: boolean;
@@ -158,7 +178,7 @@ export interface AppState {
   deleteOutboundRecipient(recipientId: string): Promise<void>;
   beginExternalMessageDraft(messageId: string, sessionId: string): void;
   cancelExternalMessageDraft(): void;
-  updateExternalDraft(field: "recipientId" | "subject" | "intro", value: string): void;
+  updateExternalDraft(field: "recipientId" | "recipientDestination" | "subject" | "intro", value: string): void;
   sendExternalMessage(): Promise<void>;
   toggleListening(): Promise<void>;
   setResponseStyle(style: ResponseStyle): Promise<void>;
@@ -271,6 +291,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   outboundRecipientLabelDraft: "",
   outboundRecipientEmailDraft: "",
   externalDraft: null,
+  pendingExternalRequest: null,
   sendingExternalMessage: false,
   renameDraftBySession: {},
   autoSpeak: false,
@@ -478,6 +499,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       outboundRecipientLabelDraft: "",
       outboundRecipientEmailDraft: "",
       externalDraft: null,
+      pendingExternalRequest: null,
       sendingExternalMessage: false,
       renameDraftBySession: {},
       autoSpeak: false,
@@ -727,12 +749,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     try {
       clearPendingVoiceTranscript();
-      const token = requireValue(get().token, "Pair this phone with the desktop first.");
-      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
       const text = get().composer.trim();
       if (!text) {
         return;
       }
+
+      if (tryHandleExternalDraftVoiceCommand(text, get, set)) {
+        return;
+      }
+
+      const token = requireValue(get().token, "Pair this phone with the desktop first.");
+      const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
 
       let sessionId = get().selectedSessionId;
       if (!sessionId) {
@@ -776,6 +803,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       set({ sendingMessage: true, error: null });
       const isVoiceTurn = get().composerInputMode === "voice";
+      const parsedExternalRequest = parseExternalSendRequest(text, get().outboundRecipients);
       const message = await api.postMessage(token, baseUrl, resolvedSessionId, {
         text,
         inputMode: get().composerInputMode,
@@ -789,6 +817,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         notice: null,
         liveTranscript: "",
         voiceAudioLevel: -2,
+        pendingExternalRequest: parsedExternalRequest
+          ? buildPendingExternalRequest(resolvedSessionId, message.id, parsedExternalRequest, state.composerInputMode === "voice")
+          : state.pendingExternalRequest,
         voiceSessionPhase:
           state.voiceSessionActive && isVoiceTurn
             ? "processing"
@@ -808,6 +839,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             : state.voiceTelemetry,
         error: null
       }));
+      if (parsedExternalRequest) {
+        set({
+          notice: `Adam Connect will prepare an email draft for ${parsedExternalRequest.recipientDestination} after this reply finishes, then wait for your confirmation.`,
+          error: null
+        });
+      }
       await get().refresh();
     } catch (error) {
       await handleStoreError(error, set, get, "Could not send that message.");
@@ -1110,8 +1147,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionId,
         messageId,
         recipientId: state.outboundRecipients[0]?.id ?? null,
+        recipientLabel: state.outboundRecipients[0]?.label ?? null,
+        recipientDestination: state.outboundRecipients[0]?.destination ?? "",
         subject: buildExternalSubject(session.title, message.content),
-        intro: ""
+        intro: "",
+        confirmationRequired: false
       },
       notice: state.outboundRecipients.length
         ? "External send draft ready. Choose a recipient, review the subject, and send when ready."
@@ -1123,6 +1163,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   cancelExternalMessageDraft() {
     set({
       externalDraft: null,
+      pendingExternalRequest: null,
       sendingExternalMessage: false,
       notice: null,
       error: null
@@ -1133,7 +1174,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       externalDraft: state.externalDraft
         ? {
             ...state.externalDraft,
-            [field]: value
+            ...(field === "recipientId"
+              ? resolveExternalDraftRecipientSelection(state.outboundRecipients, value)
+              : field === "recipientDestination"
+                ? {
+                    recipientId: null,
+                    recipientLabel: null,
+                    recipientDestination: value
+                  }
+                : { [field]: value })
           }
         : state.externalDraft
     }));
@@ -1143,10 +1192,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       const draft = requireValue(get().externalDraft, "Choose a completed assistant reply before sending it externally.");
       const token = requireValue(get().token, "Pair this phone with the desktop first.");
       const baseUrl = requireValue(get().baseUrl, "Desktop URL is required.");
-      if (!draft.recipientId) {
+      if (!draft.recipientId && !draft.recipientDestination.trim()) {
         set({
           notice: null,
-          error: "Choose a trusted recipient before sending externally."
+          error: "Choose or enter an email recipient before sending externally."
+        });
+        return;
+      }
+      if (!draft.recipientId && !isValidExternalEmail(draft.recipientDestination)) {
+        set({
+          notice: null,
+          error: "Enter a valid email address before sending externally."
         });
         return;
       }
@@ -1159,13 +1215,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       const response = await api.sendExternalMessage(token, baseUrl, {
         sessionId: draft.sessionId,
         messageId: draft.messageId,
-        recipientId: draft.recipientId,
+        ...(draft.recipientId ? { recipientId: draft.recipientId } : {}),
+        ...(!draft.recipientId
+          ? {
+              recipientDestination: draft.recipientDestination.trim(),
+              recipientLabel: draft.recipientLabel ?? draft.recipientDestination.trim()
+            }
+          : {}),
         subject: draft.subject.trim(),
         intro: draft.intro.trim()
       });
       set({
         sendingExternalMessage: false,
         externalDraft: null,
+        pendingExternalRequest: null,
         notice: `External report sent to ${response.recipient.destination}.`,
         error: null
       });
@@ -1455,6 +1518,90 @@ function buildExternalSubject(sessionTitle: string, messageContent: string): str
   return preview ? `${sessionTitle}: ${preview}` : `${sessionTitle}: Adam Connect update`;
 }
 
+function resolveExternalDraftRecipientSelection(recipients: OutboundRecipient[], recipientId: string): {
+  recipientId: string | null;
+  recipientLabel: string | null;
+  recipientDestination: string;
+} {
+  const recipient = recipients.find((item) => item.id === recipientId) ?? null;
+  return {
+    recipientId: recipient?.id ?? null,
+    recipientLabel: recipient?.label ?? null,
+    recipientDestination: recipient?.destination ?? ""
+  };
+}
+
+function buildPendingExternalRequest(
+  sessionId: string,
+  userMessageId: string,
+  request: ParsedExternalSendRequest,
+  requestedByVoice: boolean
+): PendingExternalRequestState {
+  return {
+    sessionId,
+    userMessageId,
+    recipientId: request.recipientId,
+    recipientLabel: request.recipientLabel,
+    recipientDestination: request.recipientDestination,
+    requestedByVoice
+  };
+}
+
+function buildExternalDraftFromPendingRequest(
+  request: PendingExternalRequestState,
+  sessionId: string,
+  messageId: string,
+  sessionTitle: string,
+  messageContent: string
+): ExternalDraftState {
+  return {
+    sessionId,
+    messageId,
+    recipientId: request.recipientId,
+    recipientLabel: request.recipientLabel,
+    recipientDestination: request.recipientDestination,
+    subject: buildExternalSubject(sessionTitle, messageContent),
+    intro: "",
+    confirmationRequired: true
+  };
+}
+
+function tryHandleExternalDraftVoiceCommand(
+  text: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
+): boolean {
+  const draft = get().externalDraft;
+  if (!draft) {
+    return false;
+  }
+
+  if (isExternalSendCancellation(text)) {
+    set({
+      composer: "",
+      composerInputMode: "text",
+      externalDraft: null,
+      pendingExternalRequest: null,
+      notice: "Email draft cancelled.",
+      error: null
+    });
+    return true;
+  }
+
+  if (!isExternalSendConfirmation(text)) {
+    return false;
+  }
+
+  set({
+    composer: "",
+    composerInputMode: "text",
+    notice: `Sending the drafted email to ${draft.recipientDestination}.`,
+    error: null
+  });
+  get().sendExternalMessage().catch(() => undefined);
+  return true;
+}
+
 function clearPendingVoiceCommitTimer(): void {
   if (!pendingVoiceCommitTimer) {
     return;
@@ -1725,6 +1872,20 @@ function applyStreamEvent(
     const nextMessages = [...currentMessages.filter((item) => item.id !== payload.message.id), payload.message].sort((left, right) =>
       left.createdAt.localeCompare(right.createdAt)
     );
+    const pendingExternalRequest =
+      state.pendingExternalRequest?.sessionId === payload.sessionId ? state.pendingExternalRequest : null;
+    const resolvedExternalDraft =
+      payload.message.role === "assistant" &&
+      payload.message.status === "completed" &&
+      pendingExternalRequest
+        ? buildExternalDraftFromPendingRequest(
+            pendingExternalRequest,
+            payload.sessionId,
+            payload.message.id,
+            state.sessions.find((item) => item.id === payload.sessionId)?.title ?? "Operator",
+            payload.message.content
+          )
+        : state.externalDraft;
     const shouldVoiceSpeak = payload.message.role === "assistant" && (state.autoSpeak || state.voiceSessionActive) && tts.isAvailable();
     const speechQueued =
       shouldVoiceSpeak &&
@@ -1746,6 +1907,9 @@ function applyStreamEvent(
         ...state.messagesBySession,
         [payload.sessionId]: nextMessages
       },
+      externalDraft: resolvedExternalDraft,
+      pendingExternalRequest:
+        payload.message.role === "assistant" && payload.message.status !== "streaming" && pendingExternalRequest ? null : state.pendingExternalRequest,
       voiceAssistantDraft: payload.message.role === "assistant" ? payload.message.content : state.voiceAssistantDraft,
       voiceSessionPhase:
         state.voiceSessionActive && payload.message.role === "assistant"
@@ -1759,7 +1923,15 @@ function applyStreamEvent(
           : state.voiceSessionPhase,
       lastSpokenMessageId:
         shouldVoiceSpeak && payload.message.status === "completed" ? payload.message.id : state.lastSpokenMessageId,
-      voiceTelemetry
+      voiceTelemetry,
+      notice:
+        payload.message.role === "assistant" && payload.message.status === "completed" && pendingExternalRequest
+          ? `Email draft ready for ${pendingExternalRequest.recipientDestination}. Say "yes, send it" or tap Send Email.`
+          : payload.message.role === "assistant" &&
+              pendingExternalRequest &&
+              (payload.message.status === "failed" || payload.message.status === "interrupted")
+            ? "The assistant reply was interrupted, so Adam Connect did not prepare the email draft."
+            : state.notice
     };
   });
 }
@@ -1952,6 +2124,8 @@ async function enterRepairMode(
     voiceAssistantDraft: null,
     voiceTelemetry: defaultVoiceTelemetry(),
     lastSpokenMessageId: null,
+    externalDraft: null,
+    pendingExternalRequest: null,
     notice: "Saved desktop settings were kept so you can repair this link quickly.",
     error: message,
     view: "host"

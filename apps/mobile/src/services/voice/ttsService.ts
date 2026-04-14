@@ -10,6 +10,8 @@ export interface TtsVoiceOption {
   nativeIdentifier?: string | null;
 }
 
+type SpeechBackend = "expo-speech" | "react-native-tts";
+
 type ReactNativeTtsModule = {
   voices?(): Promise<
     Array<{
@@ -118,9 +120,11 @@ export class TtsService {
   private expoVoice: { language: string; identifier?: string } | null = null;
   private preferredVoiceId: string | null = null;
   private selectedVoiceId: string | null = null;
+  private lastSuccessfulBackend: SpeechBackend | null = null;
+  private lastAttemptedBackend: SpeechBackend | null = null;
 
   isAvailable(): boolean {
-    return this.resolveBackend() !== null;
+    return this.resolvePreferredBackend() !== null;
   }
 
   async prepare(preferredVoiceId?: string | null): Promise<boolean> {
@@ -140,7 +144,7 @@ export class TtsService {
   }
 
   async listVoices(): Promise<TtsVoiceOption[]> {
-    const backend = this.resolveBackend();
+    const backend = this.resolvePreferredBackend();
     if (!backend) {
       return [];
     }
@@ -176,12 +180,10 @@ export class TtsService {
       return;
     }
 
-    this.reactNativeTts.addEventListener("tts-start", () => this.handlers.onStart?.());
+    this.reactNativeTts.addEventListener("tts-start", () => this.handleSpeechStart());
     this.reactNativeTts.addEventListener("tts-finish", () => this.handlers.onFinish?.());
     this.reactNativeTts.addEventListener("tts-cancel", () => this.handlers.onCancel?.());
-    this.reactNativeTts.addEventListener("tts-error", (event) =>
-      this.handlers.onError?.(event.message?.trim() || "Text-to-speech failed.")
-    );
+    this.reactNativeTts.addEventListener("tts-error", (event) => this.handlers.onError?.(event.message?.trim() || "Text-to-speech failed."));
     this.handlersConfigured = true;
   }
 
@@ -211,8 +213,27 @@ export class TtsService {
     this.expoSpeech?.stop();
   }
 
+  retryWithAlternateBackend(text: string): boolean {
+    const spokenText = sanitizeTextForSpeech(text);
+    if (!spokenText) {
+      return false;
+    }
+
+    const alternateBackend = this.resolveAlternateBackend(this.lastAttemptedBackend);
+    if (!alternateBackend) {
+      return false;
+    }
+
+    try {
+      this.speakWithBackend(alternateBackend, spokenText);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async describeAvailability(): Promise<string> {
-    const backend = this.resolveBackend();
+    const backend = this.resolvePreferredBackend();
     if (!backend) {
       return "Spoken replies are unavailable because this build does not include a phone speech-output backend.";
     }
@@ -239,7 +260,7 @@ export class TtsService {
   }
 
   private async initialize(): Promise<boolean> {
-    const backend = this.resolveBackend();
+    const backend = this.resolvePreferredBackend();
     if (!backend) {
       return false;
     }
@@ -251,20 +272,42 @@ export class TtsService {
     return this.initializeReactNativeTts();
   }
 
-  private resolveBackend(): "expo-speech" | "react-native-tts" | null {
-    if (Platform.OS === "android" && this.expoSpeech) {
-      return "expo-speech";
+  private resolvePreferredBackend(): SpeechBackend | null {
+    const availableBackends = this.availableBackends();
+    if (!availableBackends.length) {
+      return null;
     }
 
-    if (this.reactNativeTts) {
-      return "react-native-tts";
+    if (this.lastSuccessfulBackend && availableBackends.includes(this.lastSuccessfulBackend)) {
+      return this.lastSuccessfulBackend;
     }
 
+    return this.defaultBackendOrder().find((backend) => availableBackends.includes(backend)) ?? availableBackends[0];
+  }
+
+  private resolveAlternateBackend(currentBackend: SpeechBackend | null): SpeechBackend | null {
+    const availableBackends = this.availableBackends();
+    if (!availableBackends.length) {
+      return null;
+    }
+
+    const alternateBackend = availableBackends.find((backend) => backend !== currentBackend);
+    return alternateBackend ?? null;
+  }
+
+  private availableBackends(): SpeechBackend[] {
+    const available: SpeechBackend[] = [];
     if (this.expoSpeech) {
-      return "expo-speech";
+      available.push("expo-speech");
     }
+    if (this.reactNativeTts) {
+      available.push("react-native-tts");
+    }
+    return available;
+  }
 
-    return null;
+  private defaultBackendOrder(): SpeechBackend[] {
+    return Platform.OS === "android" ? ["expo-speech", "react-native-tts"] : ["react-native-tts", "expo-speech"];
   }
 
   private async initializeExpoSpeech(): Promise<boolean> {
@@ -311,40 +354,39 @@ export class TtsService {
   }
 
   private speakWithFallback(text: string): void {
-    const backend = this.resolveBackend();
+    const primaryBackend = this.resolvePreferredBackend();
+    if (!primaryBackend) {
+      throw new Error("No speech backend is available on this phone.");
+    }
+
+    try {
+      this.speakWithBackend(primaryBackend, text);
+      return;
+    } catch (error) {
+      const alternateBackend = this.resolveAlternateBackend(primaryBackend);
+      if (!alternateBackend) {
+        throw error;
+      }
+
+      this.speakWithBackend(alternateBackend, text);
+    }
+  }
+
+  private speakWithBackend(backend: SpeechBackend, text: string): void {
+    this.lastAttemptedBackend = backend;
     if (backend === "expo-speech") {
-      try {
-        this.speakWithExpoSpeech(text);
-        return;
-      } catch (error) {
-        if (!this.reactNativeTts) {
-          throw error;
-        }
-      }
-    }
-
-    if (backend === "react-native-tts") {
-      try {
-        this.speakWithReactNativeTts(text);
-        return;
-      } catch (error) {
-        if (!this.expoSpeech) {
-          throw error;
-        }
-      }
-    }
-
-    if (this.expoSpeech) {
       this.speakWithExpoSpeech(text);
       return;
     }
 
-    if (this.reactNativeTts) {
-      this.speakWithReactNativeTts(text);
-      return;
-    }
+    this.speakWithReactNativeTts(text);
+  }
 
-    throw new Error("No speech backend is available on this phone.");
+  private handleSpeechStart(): void {
+    if (this.lastAttemptedBackend) {
+      this.lastSuccessfulBackend = this.lastAttemptedBackend;
+    }
+    this.handlers.onStart?.();
   }
 
   private speakWithExpoSpeech(text: string): void {
@@ -358,7 +400,7 @@ export class TtsService {
       rate: 0.92,
       pitch: 1.0,
       volume: 1.0,
-      onStart: () => this.handlers.onStart?.(),
+      onStart: () => this.handleSpeechStart(),
       onDone: () => this.handlers.onFinish?.(),
       onStopped: () => this.handlers.onCancel?.(),
       onError: (error) => this.handlers.onError?.(error.message?.trim() || error.error?.trim() || "Speech playback failed.")
@@ -380,7 +422,7 @@ export class TtsService {
   }
 
   private async applyPreferredVoice(): Promise<TtsVoiceOption | null> {
-    const backend = this.resolveBackend();
+    const backend = this.resolvePreferredBackend();
     if (!backend) {
       this.selectedVoiceId = null;
       return null;
