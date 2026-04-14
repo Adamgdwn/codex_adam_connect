@@ -13,6 +13,7 @@
 - added a wake-on-request path using a separate always-on LAN wake relay so the workstation can sleep without killing the remote operator path
 - added trusted outbound email recipients plus a `Send externally` flow that reuses completed assistant replies without making a fresh model call
 - added Resend-based outbound email configuration, a wake relay deployment doc, and explicit desktop `.env` hooks for both features
+- removed the idle `Voice Loop` chat panel so it only takes space when a live voice session or spoken draft is actually active, and clarified that newly-added outbound email env vars require a desktop restart before the phone will see them
 - made the chat `Stop` action behave like a recovery control as well as a busy-run interrupt, so users can stop or reset the best available chat even when mobile session state has drifted
 - made the chat `Stop` action end the live phone-side voice loop as well, so manual stop no longer leaves the microphone listening in the background
 - hardened Android recognizer shutdown by requesting a clean `stop()` before forcing an `abort()`, which should reduce stuck-listening and audio-focus conflicts during spoken replies

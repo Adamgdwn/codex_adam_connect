@@ -273,7 +273,9 @@ export function HostScreen(props: {
         <Text style={styles.supportingText}>
           {outboundEmail?.enabled
             ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Send externally on a completed Codex reply to email it outside Adam Connect.`
-            : "External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside Adam Connect."}
+            : store.hostStatus
+              ? "External email is not ready in the running desktop process yet. If you just added the Resend env vars, restart Adam Connect on the desktop and refresh this screen."
+              : "External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside Adam Connect."}
         </Text>
         <Text style={styles.metric}>
           Provider: {outboundEmail?.provider ?? "none"} | Trusted recipients: {store.outboundRecipients.length}
@@ -663,14 +665,16 @@ export function ChatScreen(props: {
           </View>
         ) : null}
 
-        <VoiceSessionPanel
-          active={store.voiceSessionActive}
-          phase={store.voiceSessionPhase}
-          liveTranscript={store.liveTranscript}
-          assistantDraft={store.voiceAssistantDraft}
-          audioLevel={store.voiceAudioLevel}
-          telemetry={store.voiceTelemetry}
-        />
+        {store.voiceSessionActive || store.liveTranscript || store.voiceAssistantDraft ? (
+          <VoiceSessionPanel
+            active={store.voiceSessionActive}
+            phase={store.voiceSessionPhase}
+            liveTranscript={store.liveTranscript}
+            assistantDraft={store.voiceAssistantDraft}
+            audioLevel={store.voiceAudioLevel}
+            telemetry={store.voiceTelemetry}
+          />
+        ) : null}
 
         <View style={styles.messages}>
           {messages.length > 0 ? (
