@@ -58,6 +58,24 @@ describe("AssistantSpeechRuntime", () => {
     expect(onSpeakingChange).toHaveBeenCalledTimes(2);
     expect(onSpeakingChange).toHaveBeenNthCalledWith(2, false);
   });
+
+  test("queues a follow-up spoken prompt after the current reply", () => {
+    const { runtime, speak, trigger } = createRuntime();
+
+    runtime.configure({
+      onSpeakingChange: jest.fn()
+    });
+
+    expect(runtime.ingest("assistant-3", "Here is the summary.", "completed", 8)).toBe(true);
+    expect(runtime.queuePrompt("Say yes, send it to confirm.")).toBe(true);
+    expect(speak).toHaveBeenCalledTimes(1);
+
+    trigger("onStart");
+    trigger("onFinish");
+
+    expect(speak).toHaveBeenCalledTimes(2);
+    expect(speak).toHaveBeenNthCalledWith(2, "Say yes, send it to confirm.");
+  });
 });
 
 function createRuntime(): {

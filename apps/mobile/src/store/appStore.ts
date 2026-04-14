@@ -1314,23 +1314,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.voiceMuted) {
       set({
         voiceMuted: false,
-        notice: "Microphone live again.",
+        notice: pendingVoiceTranscript
+          ? "Microphone live again. Finish your thought, or stay quiet and Adam Connect will send the held turn."
+          : "Microphone live again.",
         error: null,
         voiceSessionPhase: "connecting"
       });
       await startVoiceLoopRecognition(get, set);
+      if (pendingVoiceTranscript) {
+        schedulePendingVoiceCommit(get, set);
+      }
       return;
     }
 
-    clearPendingVoiceTranscript();
+    clearPendingVoiceCommitTimer();
     voice.stopStreamingSession();
     set({
       voiceMuted: true,
       listening: false,
-      liveTranscript: "",
       voiceAudioLevel: -2,
       voiceSessionPhase: "muted",
-      notice: "Microphone muted. Adam Connect will keep speaking, but it will ignore your side until you unmute.",
+      notice: pendingVoiceTranscript
+        ? "Microphone muted. Adam Connect is holding your unfinished turn until you unmute."
+        : "Microphone muted. Adam Connect will keep speaking, but it will ignore your side until you unmute.",
       error: null
     });
   },
@@ -1639,6 +1645,11 @@ function buildExternalDraftFromPendingRequest(
   };
 }
 
+function buildExternalDraftConfirmationPrompt(request: PendingExternalRequestState, draft: ExternalDraftState): string {
+  const subjectClause = draft.subject.trim() ? ` Subject: ${draft.subject.trim()}.` : "";
+  return `I prepared an email to ${draft.recipientDestination}.${subjectClause} Say yes, send it to confirm, or say cancel.`;
+}
+
 function tryHandleExternalDraftVoiceCommand(
   text: string,
   get: () => AppState,
@@ -1707,6 +1718,11 @@ async function commitPendingVoiceTranscript(
   const transcript = normalizeVoiceTranscript(pendingVoiceTranscript ?? "");
   pendingVoiceTranscript = null;
   if (!transcript) {
+    return;
+  }
+
+  if (get().voiceMuted) {
+    pendingVoiceTranscript = transcript;
     return;
   }
 
@@ -1940,24 +1956,32 @@ function applyStreamEvent(
     return;
   }
 
+  const currentState = get();
+  const pendingExternalRequest =
+    currentState.pendingExternalRequest?.sessionId === payload.sessionId ? currentState.pendingExternalRequest : null;
+  const preparedExternalDraft =
+    payload.message.role === "assistant" &&
+    payload.message.status === "completed" &&
+    pendingExternalRequest
+      ? buildExternalDraftFromPendingRequest(
+          pendingExternalRequest,
+          payload.sessionId,
+          payload.message.id,
+          currentState.sessions.find((item) => item.id === payload.sessionId)?.title ?? "Operator",
+          payload.message.content
+        )
+      : null;
+
   set((state) => {
     const currentMessages = state.messagesBySession[payload.sessionId] ?? [];
     const nextMessages = [...currentMessages.filter((item) => item.id !== payload.message.id), payload.message].sort((left, right) =>
       left.createdAt.localeCompare(right.createdAt)
     );
-    const pendingExternalRequest =
-      state.pendingExternalRequest?.sessionId === payload.sessionId ? state.pendingExternalRequest : null;
     const resolvedExternalDraft =
       payload.message.role === "assistant" &&
       payload.message.status === "completed" &&
       pendingExternalRequest
-        ? buildExternalDraftFromPendingRequest(
-            pendingExternalRequest,
-            payload.sessionId,
-            payload.message.id,
-            state.sessions.find((item) => item.id === payload.sessionId)?.title ?? "Operator",
-            payload.message.content
-          )
+        ? preparedExternalDraft
         : state.externalDraft;
     const shouldVoiceSpeak = payload.message.role === "assistant" && (state.autoSpeak || state.voiceSessionActive) && tts.isAvailable();
     const speechQueued =
@@ -2007,6 +2031,10 @@ function applyStreamEvent(
             : state.notice
     };
   });
+
+  if (preparedExternalDraft && pendingExternalRequest && get().voiceSessionActive) {
+    assistantSpeech.queuePrompt(buildExternalDraftConfirmationPrompt(pendingExternalRequest, preparedExternalDraft));
+  }
 }
 
 function requireValue<T>(value: T | null | undefined, message: string): T {

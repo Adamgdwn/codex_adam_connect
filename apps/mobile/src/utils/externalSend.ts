@@ -37,6 +37,19 @@ export function parseExternalSendRequest(text: string, recipients: OutboundRecip
     };
   }
 
+  const spokenEmail = extractSpokenEmail(normalized);
+  if (spokenEmail) {
+    const matchingRecipient = recipients.find((recipient) => recipient.destination.toLowerCase() === spokenEmail) ?? null;
+    return {
+      recipientId: matchingRecipient?.id ?? null,
+      recipientLabel: matchingRecipient?.label ?? null,
+      recipientDestination: matchingRecipient?.destination ?? spokenEmail,
+      matchReason: matchingRecipient ? "trusted_recipient" : "explicit_email",
+      requestedSubject,
+      requestedBody
+    };
+  }
+
   const lower = normalized.toLowerCase();
   const labelMatch =
     recipients.find((recipient) => {
@@ -90,6 +103,119 @@ function extractRequestedField(text: string, fieldName: "subject" | "body" | "me
     const match = text.match(pattern)?.[1]?.trim();
     if (match) {
       return match.replace(/[.,;:]$/, "").trim();
+    }
+  }
+
+  return null;
+}
+
+function extractSpokenEmail(text: string): string | null {
+  const tokens = text
+    .toLowerCase()
+    .replace(/[,:;!?()[\]{}<>]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!tokens.length) {
+    return null;
+  }
+
+  const connectors = new Set(["at", "dot", "dash", "hyphen", "underscore", "plus"]);
+  const stopWords = new Set([
+    "a",
+    "an",
+    "and",
+    "as",
+    "because",
+    "before",
+    "body",
+    "but",
+    "cancel",
+    "for",
+    "from",
+    "if",
+    "intro",
+    "it",
+    "me",
+    "message",
+    "please",
+    "send",
+    "so",
+    "subject",
+    "thanks",
+    "that",
+    "the",
+    "then",
+    "this",
+    "to",
+    "with",
+    "you"
+  ]);
+
+  const isEmailWord = (token: string): boolean => /^[a-z0-9]+(?:[._%+-][a-z0-9]+)*$/i.test(token);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index] !== "at") {
+      continue;
+    }
+
+    let start = index - 1;
+    while (start >= 0) {
+      const token = tokens[start];
+      if (stopWords.has(token)) {
+        start += 1;
+        break;
+      }
+      if (!isEmailWord(token) && !connectors.has(token)) {
+        start += 1;
+        break;
+      }
+      start -= 1;
+    }
+    if (start < 0) {
+      start = 0;
+    }
+
+    let end = index + 1;
+    while (end < tokens.length) {
+      const token = tokens[end];
+      if (stopWords.has(token)) {
+        break;
+      }
+      if (!isEmailWord(token) && !connectors.has(token)) {
+        break;
+      }
+      end += 1;
+    }
+
+    const candidateTokens = tokens.slice(start, end);
+    if (!candidateTokens.includes("at") || !candidateTokens.includes("dot")) {
+      continue;
+    }
+
+    const candidate = candidateTokens
+      .map((token) => {
+        switch (token) {
+          case "at":
+            return "@";
+          case "dot":
+            return ".";
+          case "dash":
+          case "hyphen":
+            return "-";
+          case "underscore":
+            return "_";
+          case "plus":
+            return "+";
+          default:
+            return token;
+        }
+      })
+      .join("")
+      .replace(/^[@._+-]+|[@._+-]+$/g, "");
+
+    if (EMAIL_REGEX.test(candidate)) {
+      return candidate;
     }
   }
 

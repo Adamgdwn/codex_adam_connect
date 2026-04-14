@@ -120,6 +120,21 @@ export class AssistantSpeechRuntime {
     return this.speaking || this.pendingStart || this.queue.length > 0;
   }
 
+  queuePrompt(text: string): boolean {
+    if (!this.tts.isAvailable()) {
+      return false;
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    this.queue.push(trimmed);
+    this.flushQueue();
+    return this.speaking || this.pendingStart || this.queue.length > 0;
+  }
+
   private flushQueue(): void {
     if (this.speaking || this.pendingStart || this.queue.length === 0) {
       return;

@@ -151,9 +151,10 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - If the desktop is asleep, use `Host -> Wake Homebase` after you configure the wake relay on the desktop and the always-on LAN node.
 - If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Email this reply` on the exact assistant message you want to send.
 - Adam Connect can also detect a natural spoken email request such as “email me that link” or “email this to name@example.com”, prepare the draft when the reply finishes, and wait for a final confirmation before it sends.
-- When an email draft is waiting, you can confirm by voice with `yes, send it` or cancel with `cancel`.
+- Adam Connect now also tries to understand spoken-form addresses such as `freedom at agoperations dot ca` when speech recognition does not render the literal email characters cleanly.
+- When an email draft is waiting, Adam Connect should say the destination back to you and you can confirm by voice with `yes, send it` or cancel with `cancel`.
 - If you want to edit a typed prompt or email draft manually, open the settings gear in chat to reveal the manual tools without leaving the voice-first view.
-- If you are in a noisy space, use `Mute` in the chat header to keep the voice session alive without continuously listening to your side.
+- If you are in a noisy space, use `Mute` in the chat header to keep the voice session alive without continuously listening to your side. Adam Connect will now hold the unfinished spoken turn you already started, then let you continue it after you unmute.
 - Outbound email uses the desktop gateway's provider credentials. The phone never stores the sender API key.
 - The chat view now shows a spinning working bubble while Adam Connect is still sending or waiting on a turn, so it is easier to tell the difference between “busy” and “hung”.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.

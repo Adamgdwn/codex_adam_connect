@@ -23,6 +23,16 @@ describe("external send parsing", () => {
     });
   });
 
+  test("detects a spoken-form email destination before falling back to the default recipient", () => {
+    expect(
+      parseExternalSendRequest("Please email me a link to freedom at agoperations dot ca so I can view it.", recipients)
+    ).toMatchObject({
+      recipientId: null,
+      recipientDestination: "freedom@agoperations.ca",
+      matchReason: "explicit_email"
+    });
+  });
+
   test("maps 'email me' to the only trusted recipient", () => {
     expect(parseExternalSendRequest("Can you email me the summary when you finish?", recipients)).toMatchObject({
       recipientId: "recipient-adam",

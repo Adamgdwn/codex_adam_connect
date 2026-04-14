@@ -16,6 +16,8 @@
 - preserved explicitly requested email subject/body details in the prepared draft so simple outbound email tests do not lose the requested metadata
 - shifted the chat back toward a voice-native default so manual text compose stays behind the settings gear unless you deliberately open it or already have a manual draft in progress
 - added a live microphone mute toggle for noisy environments so the voice session can stay open without continuously listening to your side
+- fixed voice mute so it now holds an unfinished spoken turn instead of discarding the captured transcript, then resumes that same turn when you unmute
+- improved natural outbound email handling by recognizing spoken-form addresses like `name at domain dot com` and speaking a final confirmation prompt before Adam Connect waits for `yes, send it`
 - added a spinning in-chat working bubble so long-running turns are visibly active instead of feeling hung
 - added Resend-based outbound email configuration, a wake relay deployment doc, and explicit desktop `.env` hooks for both features
 - removed the idle `Voice Loop` chat panel so it only takes space when a live voice session or spoken draft is actually active, and clarified that newly-added outbound email env vars require a desktop restart before the phone will see them
