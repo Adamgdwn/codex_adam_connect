@@ -110,6 +110,7 @@ const baseStore = {
   pushSyncing: false,
   listening: false,
   voiceSessionActive: false,
+  voiceMuted: false,
   voiceSessionPhase: "idle",
   liveTranscript: "",
   voiceAudioLevel: -2,
@@ -153,6 +154,7 @@ const baseStore = {
   updateExternalDraft: jest.fn(),
   sendExternalMessage: jest.fn(async () => undefined),
   toggleListening: jest.fn(async () => undefined),
+  toggleVoiceMute: jest.fn(async () => undefined),
   setResponseStyle: jest.fn(async () => undefined),
   selectAssistantVoice: jest.fn(async () => undefined),
   setRenameDraft: jest.fn(),
@@ -162,15 +164,15 @@ const baseStore = {
 
 describe("ChatScreen busy send state", () => {
   test("disables Send while the target session is busy", async () => {
-    let tree: ReactTestRenderer.ReactTestRenderer;
+    let tree!: ReactTestRenderer.ReactTestRenderer;
 
     await ReactTestRenderer.act(async () => {
       tree = ReactTestRenderer.create(
-        <ChatScreen store={baseStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} />
+        <ChatScreen store={baseStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} manualToolsVisible />
       );
     });
 
-    const sendButton = tree!.root.findByProps({ testID: "chat-send-button" });
+    const sendButton = tree.root.findByProps({ testID: "chat-send-button" });
 
     expect(sendButton.props.disabled).toBe(true);
   });
@@ -195,15 +197,15 @@ describe("ChatScreen busy send state", () => {
       selectedSessionId: "session-2"
     } as AppState;
 
-    let tree: ReactTestRenderer.ReactTestRenderer;
+    let tree!: ReactTestRenderer.ReactTestRenderer;
 
     await ReactTestRenderer.act(async () => {
       tree = ReactTestRenderer.create(
-        <ChatScreen store={mismatchedStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} />
+        <ChatScreen store={mismatchedStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} manualToolsVisible />
       );
     });
 
-    const stopButton = tree!.root.findByProps({ testID: "chat-stop-button" });
+    const stopButton = tree.root.findByProps({ testID: "chat-stop-button" });
 
     expect(stopButton.props.disabled).toBe(false);
   });
@@ -223,16 +225,62 @@ describe("ChatScreen busy send state", () => {
       selectedSessionId: "session-1"
     } as AppState;
 
-    let tree: ReactTestRenderer.ReactTestRenderer;
+    let tree!: ReactTestRenderer.ReactTestRenderer;
 
     await ReactTestRenderer.act(async () => {
       tree = ReactTestRenderer.create(
-        <ChatScreen store={idleStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} />
+        <ChatScreen store={idleStore} onRefresh={() => undefined} keyboardInset={0} composerBottomPadding={12} manualToolsVisible />
       );
     });
 
-    const stopButton = tree!.root.findByProps({ testID: "chat-stop-button" });
+    const stopButton = tree.root.findByProps({ testID: "chat-stop-button" });
 
     expect(stopButton.props.disabled).toBe(false);
   });
+
+  test("stays voice-first until manual tools are opened", async () => {
+    const voiceFirstStore = {
+      ...baseStore,
+      composer: "",
+      sessions: [
+        {
+          ...baseStore.sessions[0],
+          status: "idle",
+          activeTurnId: null
+        }
+      ]
+    } as AppState;
+
+    let tree!: ReactTestRenderer.ReactTestRenderer;
+
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(
+        <ChatScreen
+          store={voiceFirstStore}
+          onRefresh={() => undefined}
+          keyboardInset={0}
+          composerBottomPadding={12}
+          manualToolsVisible={false}
+        />
+      );
+    });
+
+    const labels = tree.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
+
+    expect(labels).toContain("Voice-first mode is on.");
+    expect(labels).not.toContain("Send");
+  });
 });
+
+function flattenText(children: React.ReactNode): string[] {
+  if (typeof children === "string") {
+    return [children];
+  }
+  if (typeof children === "number") {
+    return [String(children)];
+  }
+  if (Array.isArray(children)) {
+    return children.flatMap((child) => flattenText(child));
+  }
+  return [];
+}

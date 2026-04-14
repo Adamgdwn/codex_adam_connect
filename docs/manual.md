@@ -105,7 +105,7 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 1. Open the `Chats` tab.
 2. Use the project wizard to pick an approved workspace root, name the project, describe the goal, and choose the reply style you want.
 3. Tap `Start Project Chat`, or just use the default `Operator` chat for quick turns.
-4. Open the chat and type a prompt, or tap `Start Voice`.
+4. Open the chat and tap `Start Voice`, or open the settings gear if you want the manual text composer.
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
@@ -113,6 +113,7 @@ For everyday use, prefer the default `Operator` chat unless you intentionally wa
 The `Operator` chat is pinned to the top of the chat list so quick remote turns stay easy to find.
 The reply-style control in the wizard and chat screen lets you ask for `Natural`, `Executive`, `Technical`, or `Concise` responses without changing the saved conversation thread.
 The chat screen is now intentionally tighter, with a compact top bar, a few small controls, and most of the screen reserved for the conversation itself.
+Voice is the default mode in chat, and the settings gear is the manual drawer for typed prompts and manual email editing.
 
 ## What The Screens Mean
 
@@ -121,6 +122,7 @@ The chat screen is now intentionally tighter, with a compact top bar, a few smal
 - `Host`: also manages wake-on-request and trusted outbound email recipients.
 - `Chats`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
 - `Chat`: send messages, run the live voice loop, watch streamed replies, and stop active runs.
+- `Chat`: the top-right voice controls also include `Mute` while a live voice session is running, so you can keep the session open without listening to your side in a noisy room.
 
 The phone and desktop should present the same broad picture of what is happening: online/offline state, run status, recent recovery needs, and whether Codex is ready.
 The phone chat view now also shows clearer message roles, timestamps, and code blocks so longer replies are easier to scan.
@@ -150,6 +152,8 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Email this reply` on the exact assistant message you want to send.
 - Adam Connect can also detect a natural spoken email request such as “email me that link” or “email this to name@example.com”, prepare the draft when the reply finishes, and wait for a final confirmation before it sends.
 - When an email draft is waiting, you can confirm by voice with `yes, send it` or cancel with `cancel`.
+- If you want to edit a typed prompt or email draft manually, open the settings gear in chat to reveal the manual tools without leaving the voice-first view.
+- If you are in a noisy space, use `Mute` in the chat header to keep the voice session alive without continuously listening to your side.
 - Outbound email uses the desktop gateway's provider credentials. The phone never stores the sender API key.
 - The chat view now shows a spinning working bubble while Adam Connect is still sending or waiting on a turn, so it is easier to tell the difference between “busy” and “hung”.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.

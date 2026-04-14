@@ -59,6 +59,7 @@ export function AppShell(): React.JSX.Element {
   };
   const refreshLabel = store.refreshing ? "Refreshing..." : "Refresh";
   const talkLabel = store.voiceSessionActive ? "End Voice" : "Start Voice";
+  const muteLabel = store.voiceMuted ? "Unmute" : "Mute";
   const controlsLabel = controlsExpanded ? "Hide Controls" : "Show Controls";
   const voiceStatus = humanizeVoiceStatus(store);
   const chatHeaderSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? store.sessions[0] ?? null;
@@ -138,6 +139,14 @@ export function AppShell(): React.JSX.Element {
                 {store.voiceSessionActive ? "Stop" : "Voice"}
               </Text>
             </Pressable>
+            {store.voiceSessionActive ? (
+              <Pressable
+                style={[styles.iconButton, store.voiceMuted ? styles.warningIconButton : null]}
+                onPress={() => store.toggleVoiceMute().catch((error) => console.warn(error))}
+              >
+                <Text style={[styles.iconButtonLabel, store.voiceMuted ? styles.warningButtonLabel : null]}>{muteLabel}</Text>
+              </Pressable>
+            ) : null}
             <Pressable testID="controls-toggle" style={styles.iconButton} onPress={() => setControlsExpanded((value) => !value)}>
               <Text style={styles.iconButtonLabel}>⚙</Text>
             </Pressable>
@@ -169,6 +178,14 @@ export function AppShell(): React.JSX.Element {
             >
               <Text style={[styles.secondaryLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>{talkLabel}</Text>
             </Pressable>
+            {store.voiceSessionActive ? (
+              <Pressable
+                style={[styles.secondaryButton, styles.headerActionButton, store.voiceMuted ? styles.warningButton : null]}
+                onPress={() => store.toggleVoiceMute().catch((error) => console.warn(error))}
+              >
+                <Text style={[styles.secondaryLabel, store.voiceMuted ? styles.warningButtonLabel : null]}>{muteLabel}</Text>
+              </Pressable>
+            ) : null}
             <Text
               style={[
                 styles.voiceStatusText,
@@ -240,6 +257,7 @@ export function AppShell(): React.JSX.Element {
           onRefresh={handleRefresh}
           keyboardInset={keyboardInset}
           composerBottomPadding={composerBottomPadding}
+          manualToolsVisible={controlsExpanded}
         />
       ) : null}
     </SafeAreaView>
@@ -271,6 +289,9 @@ function humanizeVoiceStatus(store: AppState): string {
     return "Voice unavailable on this phone";
   }
   if (store.voiceSessionActive) {
+    if (store.voiceMuted) {
+      return "Microphone muted";
+    }
     return humanizeVoiceSessionPhase(store.voiceSessionPhase);
   }
   if (!store.realtimeConnected) {

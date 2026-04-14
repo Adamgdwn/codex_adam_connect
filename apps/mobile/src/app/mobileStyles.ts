@@ -175,6 +175,7 @@ export const styles = StyleSheet.create({
   voicePreviewLabel: { color: "#1d4ed8", fontWeight: "800", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7 },
   voiceMetrics: { color: "#475569", fontSize: 12, lineHeight: 18 },
   chatComposerCard: { marginTop: 2, padding: 10, gap: 8 },
+  voiceFirstFooterCard: { marginTop: 2, paddingVertical: 12, gap: 8 },
   insetCard: {
     backgroundColor: "#fffdf8",
     borderRadius: 18,

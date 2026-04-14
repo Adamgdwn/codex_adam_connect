@@ -66,7 +66,14 @@ export function VoiceSessionPanel(props: {
 }): React.JSX.Element {
   const tone = props.phase === "error" || props.phase === "interrupted" || props.phase === "reconnecting" ? "orange" : "teal";
   const meterWidth = `${Math.max(4, Math.min(100, ((props.audioLevel + 2) / 12) * 100))}%` as `${number}%`;
-  const preview = props.liveTranscript || props.assistantDraft || (props.active ? "Waiting for speech..." : "Start voice to keep the conversation loop open.");
+  const preview =
+    props.liveTranscript ||
+    props.assistantDraft ||
+    (props.phase === "muted"
+      ? "Your microphone is muted. Adam Connect can keep speaking, but it will ignore your side until you unmute."
+      : props.active
+        ? "Waiting for speech..."
+        : "Start voice to keep the conversation loop open.");
   const label = props.liveTranscript ? "Live transcript" : props.assistantDraft ? "Assistant preview" : "Voice loop";
 
   return (

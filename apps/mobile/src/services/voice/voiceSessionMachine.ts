@@ -4,6 +4,7 @@ export type VoiceSessionPhase =
   | "idle"
   | "connecting"
   | "listening"
+  | "muted"
   | "user-speaking"
   | "processing"
   | "assistant-speaking"
@@ -117,6 +118,8 @@ export function humanizeVoiceSessionPhase(phase: VoiceSessionPhase): string {
       return "Interrupted";
     case "listening":
       return "Listening";
+    case "muted":
+      return "Muted";
     case "processing":
       return "Thinking";
     case "reconnecting":

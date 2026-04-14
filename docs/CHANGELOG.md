@@ -13,6 +13,9 @@
 - added a wake-on-request path using a separate always-on LAN wake relay so the workstation can sleep without killing the remote operator path
 - added trusted outbound email recipients plus a `Send externally` flow that reuses completed assistant replies without making a fresh model call
 - added a confirmation-based natural email path so spoken requests like “email me that link” can prepare an outbound draft automatically and wait for a final spoken or tapped confirmation before sending
+- preserved explicitly requested email subject/body details in the prepared draft so simple outbound email tests do not lose the requested metadata
+- shifted the chat back toward a voice-native default so manual text compose stays behind the settings gear unless you deliberately open it or already have a manual draft in progress
+- added a live microphone mute toggle for noisy environments so the voice session can stay open without continuously listening to your side
 - added a spinning in-chat working bubble so long-running turns are visibly active instead of feeling hung
 - added Resend-based outbound email configuration, a wake relay deployment doc, and explicit desktop `.env` hooks for both features
 - removed the idle `Voice Loop` chat panel so it only takes space when a live voice session or spoken draft is actually active, and clarified that newly-added outbound email env vars require a desktop restart before the phone will see them

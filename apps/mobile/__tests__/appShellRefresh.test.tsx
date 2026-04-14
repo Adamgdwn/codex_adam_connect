@@ -90,6 +90,7 @@ const mockStore = {
   pushSyncing: false,
   listening: false,
   voiceSessionActive: false,
+  voiceMuted: false,
   voiceSessionPhase: "idle",
   liveTranscript: "",
   voiceAudioLevel: -2,
@@ -133,6 +134,7 @@ const mockStore = {
   updateExternalDraft: jest.fn(),
   sendExternalMessage: jest.fn(async () => undefined),
   toggleListening: jest.fn(async () => undefined),
+  toggleVoiceMute: jest.fn(async () => undefined),
   setResponseStyle: jest.fn(async () => undefined),
   selectAssistantVoice: jest.fn(async () => undefined),
   setRenameDraft: jest.fn(),
@@ -151,6 +153,8 @@ describe("refresh affordances", () => {
     mockStore.sendingMessage = false;
     mockStore.voiceAvailable = true;
     mockStore.realtimeConnected = true;
+    mockStore.voiceMuted = false;
+    mockStore.voiceSessionActive = false;
     mockStore.hostStatus.auth.status = "logged_in";
     mockStore.refresh.mockClear();
     mockStore.bootstrap.mockClear();
@@ -206,6 +210,22 @@ describe("refresh affordances", () => {
     expect(labels).not.toContain("Adam Connect");
     expect(labels).not.toContain("Refresh");
     expect(labels).not.toContain("Disconnect");
+  });
+
+  test("shows a mute control while the live voice loop is active", async () => {
+    mockStore.view = "chat";
+    mockStore.voiceSessionActive = true;
+
+    let tree: ReactTestRenderer.ReactTestRenderer;
+
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(<AppShell />);
+    });
+
+    const labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
+
+    expect(labels).toContain("Stop");
+    expect(labels).toContain("Mute");
   });
 });
 

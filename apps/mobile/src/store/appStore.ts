@@ -101,6 +101,8 @@ interface PendingExternalRequestState {
   recipientLabel: string | null;
   recipientDestination: string;
   requestedByVoice: boolean;
+  requestedSubject: string | null;
+  requestedBody: string | null;
 }
 
 export interface AppState {
@@ -146,6 +148,7 @@ export interface AppState {
   pushSyncing: boolean;
   listening: boolean;
   voiceSessionActive: boolean;
+  voiceMuted: boolean;
   voiceSessionPhase: VoiceSessionPhase;
   liveTranscript: string;
   voiceAudioLevel: number;
@@ -181,6 +184,7 @@ export interface AppState {
   updateExternalDraft(field: "recipientId" | "recipientDestination" | "subject" | "intro", value: string): void;
   sendExternalMessage(): Promise<void>;
   toggleListening(): Promise<void>;
+  toggleVoiceMute(): Promise<void>;
   setResponseStyle(style: ResponseStyle): Promise<void>;
   selectAssistantVoice(voiceId: string | null): Promise<void>;
   setRenameDraft(sessionId: string, value: string): void;
@@ -301,6 +305,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pushSyncing: false,
   listening: false,
   voiceSessionActive: false,
+  voiceMuted: false,
   voiceSessionPhase: "idle",
   liveTranscript: "",
   voiceAudioLevel: -2,
@@ -323,7 +328,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
           if (speaking) {
             return {
-              voiceSessionPhase: "assistant-speaking",
+              voiceSessionPhase: state.voiceMuted ? "muted" : "assistant-speaking",
               voiceTelemetry: {
                 ...state.voiceTelemetry,
                 lastAssistantStartedAt: new Date().toISOString()
@@ -331,17 +336,17 @@ export const useAppStore = create<AppState>((set, get) => ({
             };
           }
 
-          if (state.voiceSessionPhase === "assistant-speaking") {
+          if (state.voiceSessionPhase === "assistant-speaking" || state.voiceSessionPhase === "muted") {
             return {
               listening: SHOULD_PAUSE_RECOGNITION_DURING_TTS ? false : state.listening,
-              voiceSessionPhase: state.error ? "error" : "listening"
+              voiceSessionPhase: state.voiceMuted ? "muted" : state.error ? "error" : "listening"
             };
           }
 
           return {};
         });
 
-        if (!speaking) {
+        if (!speaking && !get().voiceMuted) {
           ensureVoiceLoopListening(get, set).catch(() => undefined);
         }
       },
@@ -349,9 +354,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => ({
           notice: message,
           listening: SHOULD_PAUSE_RECOGNITION_DURING_TTS ? false : state.listening,
-          voiceSessionPhase: state.voiceSessionActive ? "listening" : state.voiceSessionPhase
+          voiceSessionPhase: state.voiceSessionActive ? (state.voiceMuted ? "muted" : "listening") : state.voiceSessionPhase
         }));
-        ensureVoiceLoopListening(get, set).catch(() => undefined);
+        if (!get().voiceMuted) {
+          ensureVoiceLoopListening(get, set).catch(() => undefined);
+        }
       }
     });
 
@@ -506,6 +513,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       autoSendVoice: true,
       listening: false,
       voiceSessionActive: false,
+      voiceMuted: false,
       voiceSessionPhase: "idle",
       liveTranscript: "",
       voiceAudioLevel: -2,
@@ -1243,6 +1251,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         listening: false,
         voiceSessionActive: false,
+        voiceMuted: false,
         voiceSessionPhase: "error",
         notice: null,
         error: "Realtime voice sessions are disabled in this build."
@@ -1254,6 +1263,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         listening: false,
         voiceSessionActive: false,
+        voiceMuted: false,
         voiceSessionPhase: "error",
         notice: null,
         error: "Voice input is not available on this phone yet. Install or enable the device speech recognition service and try again."
@@ -1270,11 +1280,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({
-      notice: "Voice loop starting. Speak naturally and Adam Connect will keep listening between turns.",
-      error: null,
-      voiceSessionActive: true,
-      listening: true,
-      voiceSessionPhase: "connecting",
+        notice: "Voice loop starting. Speak naturally and Adam Connect will keep listening between turns.",
+        error: null,
+        voiceSessionActive: true,
+        voiceMuted: false,
+        listening: true,
+        voiceSessionPhase: "connecting",
       liveTranscript: "",
       voiceAudioLevel: -2,
       voiceAssistantDraft: null
@@ -1289,6 +1300,39 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     await startVoiceLoopRecognition(get, set);
+  },
+  async toggleVoiceMute() {
+    const state = get();
+    if (!state.voiceSessionActive) {
+      set({
+        notice: "Start the voice loop first, then mute your microphone when you need a quieter side channel.",
+        error: null
+      });
+      return;
+    }
+
+    if (state.voiceMuted) {
+      set({
+        voiceMuted: false,
+        notice: "Microphone live again.",
+        error: null,
+        voiceSessionPhase: "connecting"
+      });
+      await startVoiceLoopRecognition(get, set);
+      return;
+    }
+
+    clearPendingVoiceTranscript();
+    voice.stopStreamingSession();
+    set({
+      voiceMuted: true,
+      listening: false,
+      liveTranscript: "",
+      voiceAudioLevel: -2,
+      voiceSessionPhase: "muted",
+      notice: "Microphone muted. Adam Connect will keep speaking, but it will ignore your side until you unmute.",
+      error: null
+    });
   },
   async setResponseStyle(style) {
     await persistSettings(get, { responseStyle: style });
@@ -1337,12 +1381,15 @@ function buildVoiceSessionCallbacks(
   return {
     onListening: () => {
       set((state) => ({
-        listening: true,
-        voiceSessionPhase: state.voiceSessionPhase === "assistant-speaking" ? state.voiceSessionPhase : "listening",
+        listening: state.voiceMuted ? false : true,
+        voiceSessionPhase: state.voiceMuted ? "muted" : state.voiceSessionPhase === "assistant-speaking" ? state.voiceSessionPhase : "listening",
         error: null
       }));
     },
     onSpeechStart: () => {
+      if (get().voiceMuted) {
+        return;
+      }
       clearPendingVoiceCommitTimer();
       set((state) => ({
         listening: true,
@@ -1365,9 +1412,15 @@ function buildVoiceSessionCallbacks(
       });
     },
     onVolume: (value) => {
+      if (get().voiceMuted) {
+        return;
+      }
       set({ voiceAudioLevel: value });
     },
     onPartialTranscript: (text) => {
+      if (get().voiceMuted) {
+        return;
+      }
       const normalized = normalizeVoiceTranscript(text);
       if (!normalized) {
         return;
@@ -1400,6 +1453,9 @@ function buildVoiceSessionCallbacks(
       }
     },
     onFinalTranscript: (text) => {
+      if (get().voiceMuted) {
+        return;
+      }
       const normalized = normalizeVoiceTranscript(text);
       if (!normalized) {
         set({ liveTranscript: "", voiceSessionPhase: "listening" });
@@ -1430,6 +1486,10 @@ function buildVoiceSessionCallbacks(
       schedulePendingVoiceCommit(get, set);
     },
     onReconnect: () => {
+      if (get().voiceMuted) {
+        set({ listening: false, voiceSessionPhase: "muted" });
+        return;
+      }
       set((state) => ({
         listening: false,
         voiceSessionPhase: state.voiceSessionActive ? "reconnecting" : state.voiceSessionPhase,
@@ -1445,6 +1505,7 @@ function buildVoiceSessionCallbacks(
       set({
         listening: false,
         voiceSessionActive: false,
+        voiceMuted: false,
         voiceSessionPhase: "error",
         liveTranscript: "",
         voiceAudioLevel: -2,
@@ -1460,6 +1521,14 @@ async function startVoiceLoopRecognition(
   get: () => AppState,
   set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void
 ): Promise<void> {
+  if (get().voiceMuted) {
+    set({
+      listening: false,
+      voiceSessionPhase: "muted"
+    });
+    return;
+  }
+
   try {
     await voice.startStreamingSession(buildVoiceSessionCallbacks(get, set));
   } catch (error) {
@@ -1469,6 +1538,7 @@ async function startVoiceLoopRecognition(
     set({
       listening: false,
       voiceSessionActive: false,
+      voiceMuted: false,
       voiceSessionPhase: "error",
       notice: null,
       error: error instanceof Error ? error.message : "Voice recognition could not start."
@@ -1487,6 +1557,7 @@ function stopActiveVoiceLoop(
   set({
     listening: false,
     voiceSessionActive: false,
+    voiceMuted: false,
     voiceSessionPhase: "idle",
     liveTranscript: "",
     voiceAudioLevel: -2,
@@ -1543,7 +1614,9 @@ function buildPendingExternalRequest(
     recipientId: request.recipientId,
     recipientLabel: request.recipientLabel,
     recipientDestination: request.recipientDestination,
-    requestedByVoice
+    requestedByVoice,
+    requestedSubject: request.requestedSubject,
+    requestedBody: request.requestedBody
   };
 }
 
@@ -1560,8 +1633,8 @@ function buildExternalDraftFromPendingRequest(
     recipientId: request.recipientId,
     recipientLabel: request.recipientLabel,
     recipientDestination: request.recipientDestination,
-    subject: buildExternalSubject(sessionTitle, messageContent),
-    intro: "",
+    subject: request.requestedSubject ?? buildExternalSubject(sessionTitle, messageContent),
+    intro: request.requestedBody ?? "",
     confirmationRequired: true
   };
 }
@@ -1708,7 +1781,7 @@ async function ensureVoiceLoopListening(
   }
 
   const state = get();
-  if (!state.voiceSessionActive || state.voiceSessionPhase === "review" || state.listening) {
+  if (!state.voiceSessionActive || state.voiceMuted || state.voiceSessionPhase === "review" || state.listening) {
     return;
   }
 

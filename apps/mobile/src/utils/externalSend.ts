@@ -5,6 +5,8 @@ export interface ParsedExternalSendRequest {
   recipientLabel: string | null;
   recipientDestination: string;
   matchReason: "explicit_email" | "trusted_recipient" | "single_recipient_me";
+  requestedSubject: string | null;
+  requestedBody: string | null;
 }
 
 const EMAIL_REGEX = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
@@ -19,6 +21,9 @@ export function parseExternalSendRequest(text: string, recipients: OutboundRecip
     return null;
   }
 
+  const requestedSubject = extractRequestedField(normalized, "subject");
+  const requestedBody = extractRequestedField(normalized, "body") ?? extractRequestedField(normalized, "message");
+
   const explicitEmail = normalized.match(EMAIL_REGEX)?.[0]?.toLowerCase() ?? null;
   if (explicitEmail) {
     const matchingRecipient = recipients.find((recipient) => recipient.destination.toLowerCase() === explicitEmail) ?? null;
@@ -26,7 +31,9 @@ export function parseExternalSendRequest(text: string, recipients: OutboundRecip
       recipientId: matchingRecipient?.id ?? null,
       recipientLabel: matchingRecipient?.label ?? null,
       recipientDestination: matchingRecipient?.destination ?? explicitEmail,
-      matchReason: matchingRecipient ? "trusted_recipient" : "explicit_email"
+      matchReason: matchingRecipient ? "trusted_recipient" : "explicit_email",
+      requestedSubject,
+      requestedBody
     };
   }
 
@@ -41,7 +48,9 @@ export function parseExternalSendRequest(text: string, recipients: OutboundRecip
       recipientId: labelMatch.id,
       recipientLabel: labelMatch.label,
       recipientDestination: labelMatch.destination,
-      matchReason: "trusted_recipient"
+      matchReason: "trusted_recipient",
+      requestedSubject,
+      requestedBody
     };
   }
 
@@ -50,7 +59,9 @@ export function parseExternalSendRequest(text: string, recipients: OutboundRecip
       recipientId: recipients[0]?.id ?? null,
       recipientLabel: recipients[0]?.label ?? null,
       recipientDestination: recipients[0]?.destination ?? "",
-      matchReason: "single_recipient_me"
+      matchReason: "single_recipient_me",
+      requestedSubject,
+      requestedBody
     };
   }
 
@@ -67,4 +78,20 @@ export function isExternalSendCancellation(text: string): boolean {
 
 export function isValidExternalEmail(value: string): boolean {
   return EMAIL_REGEX.test(value.trim());
+}
+
+function extractRequestedField(text: string, fieldName: "subject" | "body" | "message"): string | null {
+  const patterns = [
+    new RegExp(`${fieldName}\\s*[:=-]\\s*["“]?([^"”\\n]+)["”]?`, "i"),
+    new RegExp(`${fieldName}\\s+(?:is|as)\\s+["“]?([^"”\\n]+)["”]?`, "i")
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern)?.[1]?.trim();
+    if (match) {
+      return match.replace(/[.,;:]$/, "").trim();
+    }
+  }
+
+  return null;
 }

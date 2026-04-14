@@ -568,8 +568,9 @@ export function ChatScreen(props: {
   onRefresh(): void;
   keyboardInset: number;
   composerBottomPadding: number;
+  manualToolsVisible: boolean;
 }): React.JSX.Element {
-  const { store, onRefresh, keyboardInset, composerBottomPadding } = props;
+  const { store, onRefresh, keyboardInset, composerBottomPadding, manualToolsVisible } = props;
   const selectedSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? null;
   const sendTargetSession = findSendTargetSession(store.selectedSessionId, store.sessions);
   const stopTargetSession = findStopTargetSession(store.selectedSessionId, store.sessions);
@@ -599,7 +600,10 @@ export function ChatScreen(props: {
   );
   const scrollRef = useRef<ScrollView | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  const [expandExternalDraft, setExpandExternalDraft] = useState(false);
   const showChatChrome = !selectedSession || Boolean(selectedSession.lastError) || (!hasSelectedSession && hasFallbackSession);
+  const showExternalDraftCard = Boolean(store.externalDraft);
+  const showManualComposer = manualToolsVisible || Boolean(store.composer.trim()) || !store.voiceAvailable;
   const chatHelperText = !hasFallbackSession
     ? "Start or resume a chat before sending your first prompt."
     : !store.voiceAvailable
@@ -617,6 +621,15 @@ export function ChatScreen(props: {
     }, 50);
     return () => clearTimeout(timer);
   }, [lastMessageSnapshot, selectedSession?.id, stickToBottom]);
+
+  useEffect(() => {
+    if (!store.externalDraft) {
+      setExpandExternalDraft(false);
+      return;
+    }
+
+    setExpandExternalDraft(manualToolsVisible || !store.externalDraft.confirmationRequired);
+  }, [manualToolsVisible, store.externalDraft]);
 
   return (
     <View style={styles.chatScreen}>
@@ -708,10 +721,18 @@ export function ChatScreen(props: {
         </View>
       </ScrollView>
 
-      <View style={[styles.card, styles.chatComposerCard, { marginBottom: composerBottomPadding + keyboardInset }]}>
+      {showExternalDraftCard || showManualComposer ? (
+        <View style={[styles.card, styles.chatComposerCard, { marginBottom: composerBottomPadding + keyboardInset }]}>
         {store.externalDraft ? (
           <View style={styles.insetCard}>
-            <Text style={styles.sectionTitle}>Send Externally</Text>
+            <View style={styles.rowBetween}>
+              <Text style={styles.sectionTitle}>Send Externally</Text>
+              {store.externalDraft.confirmationRequired ? (
+                <Pressable style={styles.secondaryButton} onPress={() => setExpandExternalDraft((value) => !value)}>
+                  <Text style={styles.secondaryLabel}>{expandExternalDraft ? "Collapse" : "Edit"}</Text>
+                </Pressable>
+              ) : null}
+            </View>
             <Text style={styles.supportingText}>
               {selectedExternalMessage
                 ? store.externalDraft.confirmationRequired
@@ -743,29 +764,40 @@ export function ChatScreen(props: {
               <Text style={styles.helperText}>Add at least one trusted recipient on the Host tab first.</Text>
             ) : null}
             {store.externalDraft.confirmationRequired ? (
-              <Text style={styles.helperText}>You can confirm by voice with “yes, send it” or cancel with “cancel”.</Text>
+              <Text style={styles.helperText}>
+                You can confirm by voice with “yes, send it” or cancel with “cancel”. Open ⚙ if you want to edit the draft manually.
+              </Text>
             ) : null}
-            <LabeledInput
-              label="Recipient Email"
-              value={store.externalDraft.recipientDestination}
-              onChange={(value) => store.updateExternalDraft("recipientDestination", value)}
-              autoCapitalize="none"
-              placeholder="name@example.com"
-            />
-            <LabeledInput
-              label="Email Subject"
-              value={store.externalDraft.subject}
-              onChange={(value) => store.updateExternalDraft("subject", value)}
-              autoCapitalize="sentences"
-            />
-            <LabeledInput
-              label="Intro"
-              value={store.externalDraft.intro}
-              onChange={(value) => store.updateExternalDraft("intro", value)}
-              autoCapitalize="sentences"
-              multiline
-              placeholder="Optional note before the Codex output..."
-            />
+            {!expandExternalDraft ? (
+              <View style={styles.insetCard}>
+                <Text style={styles.metric}>To: {store.externalDraft.recipientDestination || "Choose recipient"}</Text>
+                <Text style={styles.metric}>Subject: {store.externalDraft.subject || "Add subject"}</Text>
+              </View>
+            ) : (
+              <>
+                <LabeledInput
+                  label="Recipient Email"
+                  value={store.externalDraft.recipientDestination}
+                  onChange={(value) => store.updateExternalDraft("recipientDestination", value)}
+                  autoCapitalize="none"
+                  placeholder="name@example.com"
+                />
+                <LabeledInput
+                  label="Email Subject"
+                  value={store.externalDraft.subject}
+                  onChange={(value) => store.updateExternalDraft("subject", value)}
+                  autoCapitalize="sentences"
+                />
+                <LabeledInput
+                  label="Intro"
+                  value={store.externalDraft.intro}
+                  onChange={(value) => store.updateExternalDraft("intro", value)}
+                  autoCapitalize="sentences"
+                  multiline
+                  placeholder="Optional note before the Codex output..."
+                />
+              </>
+            )}
             <View style={styles.actions}>
               <Pressable style={styles.secondaryButton} onPress={() => store.cancelExternalMessageDraft()}>
                 <Text style={styles.secondaryLabel}>Cancel</Text>
@@ -780,15 +812,36 @@ export function ChatScreen(props: {
             </View>
           </View>
         ) : null}
-        <TextInput
-          value={store.composer}
-          onChangeText={(value) => store.setField("composer", value)}
-          placeholder="Ask Codex something about this repo..."
-          placeholderTextColor="#64748b"
-          multiline
-          style={[styles.composer, Platform.OS === "android" ? styles.composerCompact : null]}
-        />
-        <View style={[styles.actions, styles.chatComposerActions]}>
+        {showManualComposer ? (
+          <>
+            <TextInput
+              value={store.composer}
+              onChangeText={(value) => store.setField("composer", value)}
+              placeholder="Ask Codex something about this repo..."
+              placeholderTextColor="#64748b"
+              multiline
+              style={[styles.composer, Platform.OS === "android" ? styles.composerCompact : null]}
+            />
+            <View style={[styles.actions, styles.chatComposerActions]}>
+              <Pressable
+                testID="chat-stop-button"
+                style={[styles.secondaryButton, styles.chatComposerActionButton, !canRequestStop ? styles.disabledButton : null]}
+                onPress={() => store.stopSession().catch((error) => console.warn(error))}
+                disabled={!canRequestStop}
+              >
+                <Text style={styles.secondaryLabel}>Stop</Text>
+              </Pressable>
+              <Pressable
+                testID="chat-send-button"
+                style={[styles.primaryButton, styles.chatComposerActionButton, !canSend ? styles.disabledButton : null]}
+                onPress={() => store.sendMessage().catch((error) => console.warn(error))}
+                disabled={!canSend}
+              >
+                <Text style={styles.primaryLabel}>Send</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
           <Pressable
             testID="chat-stop-button"
             style={[styles.secondaryButton, styles.chatComposerActionButton, !canRequestStop ? styles.disabledButton : null]}
@@ -797,19 +850,27 @@ export function ChatScreen(props: {
           >
             <Text style={styles.secondaryLabel}>Stop</Text>
           </Pressable>
-          <Pressable
-            testID="chat-send-button"
-            style={[styles.primaryButton, styles.chatComposerActionButton, !canSend ? styles.disabledButton : null]}
-            onPress={() => store.sendMessage().catch((error) => console.warn(error))}
-            disabled={!canSend}
-          >
-            <Text style={styles.primaryLabel}>Send</Text>
-          </Pressable>
-        </View>
+        )}
         {busy ? <Text style={styles.helperText}>Stop targets the currently busy chat, even if you are viewing a different thread.</Text> : null}
         {!busy && canRequestStop ? <Text style={styles.helperText}>Stop can also be used as a recovery action if this chat feels stuck.</Text> : null}
         {chatHelperText ? <Text style={styles.helperText}>{chatHelperText}</Text> : null}
-      </View>
+        </View>
+      ) : (
+        <View style={[styles.card, styles.voiceFirstFooterCard, { marginBottom: composerBottomPadding + keyboardInset }]}>
+          <Text style={styles.metric}>Voice-first mode is on.</Text>
+          <Text style={styles.helperText}>Open ⚙ to reach manual text and email tools.</Text>
+          {canRequestStop ? (
+            <Pressable
+              testID="chat-stop-button"
+              style={[styles.secondaryButton, styles.chatComposerActionButton]}
+              onPress={() => store.stopSession().catch((error) => console.warn(error))}
+            >
+              <Text style={styles.secondaryLabel}>Stop</Text>
+            </Pressable>
+          ) : null}
+          {chatHelperText ? <Text style={styles.helperText}>{chatHelperText}</Text> : null}
+        </View>
+      )}
     </View>
   );
 }
