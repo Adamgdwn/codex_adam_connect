@@ -2,17 +2,29 @@
 
 ## Unreleased
 
+- improved the mobile spoken-reply voice picker so each option now shows accent,
+  engine, quality, and any safe style or gender hint Android actually exposes,
+  while clearly saying when gender is not exposed
+- restored Android spoken replies to prefer the native `react-native-tts` backend
+  first, with Expo speech still available as a fallback
+- kept Android recognition alive during spoken replies so barge-in works again,
+  then tightened interruption filtering so Freedom is less likely to interrupt
+  itself from speaker bleed
+- pulled the phone shell back toward the working operator flow after the more
+  disruptive redesign pass, while keeping the `Overview`, `Build`, and `Talk`
+  surfaces and Freedom branding
 - rebranded the supported desktop shell and mobile companion around `Freedom` while
   keeping Connect as the runtime and transport layer underneath
 - added shared Freedom session identity metadata so desktop and phone surfaces can refer
   to the same assistant and audit correlation
 - replaced the old one-shot voice helper with a continuous voice session loop that keeps listening between turns, shows live transcript/audio state, starts TTS from streamed assistant deltas, and stops cleanly on barge-in
-- made Android voice playback more reliable by pausing speech recognition while reply audio is starting, then resuming the live voice loop immediately after each spoken reply
+- kept the live recognizer active during spoken replies and filtered likely assistant-audio echo so phone-side barge-in works without Freedom interrupting itself
 - added an Expo speech-output fallback on Android so spoken replies no longer depend on a single flaky phone-local TTS backend
 - stopped fresh voice turns from sitting behind a long-running busy state by actively interrupting the current run before auto-sending the next captured voice turn
 - stopped the dashboard APK install links from opening a useless blank browser tab by turning them into direct downloads with explicit Android attachment headers
 - made live voice turns less trigger-happy on short pauses by buffering a finalized transcript briefly and merging immediate continuation speech into the same turn
 - added a device-side `Test Spoken Reply` control and richer Android TTS engine/voice diagnostics so reply-audio failures can be separated from live voice-loop bugs
+- refreshed spoken-reply voice changes more aggressively and now warn when Android does not actually confirm a requested voice switch
 - added a mobile spoken-reply voice picker plus a more accessible global reply-style control so voice behavior can be tuned without leaving the operator console
 - added a wake-on-request path using a separate always-on LAN wake relay so the workstation can sleep without killing the remote operator path
 - added trusted outbound email recipients plus a `Send externally` flow that reuses completed assistant replies without making a fresh model call

@@ -1,6 +1,6 @@
 # User Manual
 
-Adam Connect lets your phone talk to the Codex CLI running on your desktop computer over Tailscale. The phone does not need an OpenAI API key. Your desktop stays the trusted bridge.
+Freedom Companion lets your phone talk to the Codex CLI running on your desktop computer over Tailscale. Connect remains the runtime bridge underneath, but the user-facing desktop shell and phone app should both feel like `Freedom`.
 
 The near-term product goal is simple: the phone should feel like a persistent remote operator console for Codex, not a thin terminal.
 
@@ -48,7 +48,7 @@ npm run build:android-release
 
 ```mermaid
 flowchart TD
-    A[Desktop launches Adam Connect] --> B[Electron shell opens]
+    A[Desktop launches Freedom Desktop] --> B[Electron shell opens]
     B --> C[Gateway publishes install page and pairing code]
     C --> D[Phone opens install page over Tailscale]
     D --> E[User installs Android APK]
@@ -70,7 +70,7 @@ flowchart TD
 5. Tap `Download Android APK`.
    The dashboard should serve a release APK when one exists.
 6. If Android warns about installing from the browser, allow that browser as an install source.
-7. Finish the app install and open Adam Connect.
+7. Finish the app install and open Freedom.
 
 Typical desktop URLs are:
 
@@ -80,13 +80,13 @@ Typical desktop URLs are:
 
 ## Pair The Phone
 
-1. Open Adam Connect on the phone.
+1. Open Freedom on the phone.
 2. Confirm the desktop URL shown by the host or install page.
    The app now pre-fills the desktop URL on builds produced from this desktop, so you usually only need to change it if you are pairing against a different host.
 3. Enter the current pairing code.
-4. Tap `Pair Phone`.
+4. Tap `Link Phone`.
 5. Wait for the host status screen to load.
-6. Adam Connect will create a default `Operator` chat automatically the first time you refresh or send a prompt.
+6. Freedom will create a default `Operator` chat automatically the first time you refresh or send a prompt.
 
 Notes:
 - The QR code is optional. The real pairing inputs are the desktop URL and pairing code.
@@ -94,7 +94,7 @@ Notes:
 - That means normal day-to-day use should not require repairing unless you reinstall the app, clear app storage, or move to a new phone.
 - The pairing code now stays stable across normal desktop restarts, so remote recovery is less fragile.
 - Reconnecting to an existing paired desktop should be treated as recovery, not as a full new setup flow.
-- If the saved phone token goes stale, Adam Connect keeps the saved desktop URL and device settings so repair is faster than a full new setup.
+- If the saved phone token goes stale, Freedom Companion keeps the saved desktop URL and device settings so repair is faster than a full new setup.
 
 The current desktop URL is usually shown near the top of the desktop dashboard and on the phone install page, for example:
 
@@ -102,10 +102,10 @@ The current desktop URL is usually shown near the top of the desktop dashboard a
 
 ## Start Your First Chat
 
-1. Open the `Chats` tab.
+1. Open the `Build` surface if you want to create or manage a named work thread, or jump straight into `Talk` for the default operator path.
 2. Use the project wizard to pick an approved workspace root, name the project, describe the goal, and choose the reply style you want.
 3. Tap `Start Project Chat`, or just use the default `Operator` chat for quick turns.
-4. Open the chat and tap `Start Voice`, or open the settings gear if you want the manual text composer.
+4. Open `Talk` and tap `Start Voice`, or open the settings gear if you want the manual text composer.
 5. Watch the reply stream in real time.
 6. Tap `Stop` if you want to interrupt the current run.
 
@@ -118,11 +118,10 @@ Voice is the default mode in chat, and the settings gear is the manual drawer fo
 ## What The Screens Mean
 
 - `Connect`: pair the phone to the desktop using Tailscale, the desktop URL, and the pairing code.
-- `Host`: check Codex login state, Tailscale reachability, approved roots, and voice settings.
-- `Host`: also manages wake-on-request and trusted outbound email recipients.
-- `Chats`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
-- `Chat`: send messages, run the live voice loop, watch streamed replies, and stop active runs.
-- `Chat`: the top-right voice controls also include `Mute` while a live voice session is running, so you can keep the session open without listening to your side in a noisy room.
+- `Overview`: check Codex login state, Tailscale reachability, approved roots, voice settings, wake controls, and trusted outbound email recipients.
+- `Build`: create or reopen persistent chat sessions tied to approved desktop roots, including project kickoff prompts.
+- `Talk`: send messages, run the live voice loop, watch streamed replies, and stop active runs.
+- `Talk`: the top-right voice controls also include `Mute` while a live voice session is running, so you can keep the session open without listening to your side in a noisy room.
 
 The phone and desktop should present the same broad picture of what is happening: online/offline state, run status, recent recovery needs, and whether Codex is ready.
 The phone chat view now also shows clearer message roles, timestamps, and code blocks so longer replies are easier to scan.
@@ -136,34 +135,35 @@ The phone chat view now also shows clearer message roles, timestamps, and code b
 - If the phone pairs but replies do not appear, check the terminal running `npm run launch`.
 - If the phone shows `Unable to load script`, you installed a debug APK that expects Metro. Rebuild with `npm run build:android-release` and reinstall from the dashboard.
 - If voice says it is unavailable, confirm the phone has a speech recognition service enabled and set as the default Android voice service.
-- Use `Host -> Voice -> Test Spoken Reply` to verify that the phone itself can play a spoken reply before debugging the live conversation loop.
-- On Android, Adam Connect now prefers Expo speech output for spoken replies and falls back to the older Android text-to-speech module if needed.
-- On Android, Adam Connect pauses the recognizer briefly while it plays a spoken reply, then resumes listening automatically for the next turn. If you still do not hear reply audio, first check the phone's media volume and Android speech output settings.
+- Use `Overview -> Voice & Reply Loop -> Test Spoken Reply` to verify that the phone itself can play a spoken reply before debugging the live conversation loop.
+- On Android, Freedom now prefers the native Android text-to-speech backend for spoken replies and falls back to Expo speech if the native path is not healthy on that device.
+- On Android, Freedom keeps recognition alive during spoken replies so explicit barge-in works, then filters likely assistant-echo so Freedom is less likely to interrupt itself. If you still do not hear reply audio, first check the phone's media volume and Android speech output settings.
+- The spoken-reply voice picker now shows accent, engine, quality, and any safe style or gender hints the phone exposes, so you do not have to test blindly.
 - The live voice loop now waits briefly before auto-sending a just-finished transcript, so a short mid-sentence pause is less likely to be treated as a brand-new turn.
 - If the live voice loop keeps reconnecting, pull to refresh once and confirm the realtime websocket is still healthy.
-- If a voice turn pauses for review instead of sending, Adam Connect likely decided the transcript was long or risky enough to require confirmation first.
+- If a voice turn pauses for review instead of sending, Freedom likely decided the transcript was long or risky enough to require confirmation first.
 - If the app says the desktop link needs repair, use the saved desktop URL and current pairing code instead of disconnecting and re-entering everything manually.
-- If a chat says it is busy while the live voice loop is active, Adam Connect should now stop the current run automatically before sending the next spoken turn. If it still looks stuck, pull to refresh once and then use `Stop`.
+- If a chat says it is busy while the live voice loop is active, Freedom should now stop the current run automatically before sending the next spoken turn. If it still looks stuck, pull to refresh once and then use `Stop`.
 - `Stop` now also works as a recovery action for the current or fallback chat, even if the phone UI is no longer showing that chat as busy.
 - `Stop` also ends the live voice loop on the phone now, so the mic should stop listening immediately when you use it during a voice session.
-- On Android, Adam Connect now asks the recognizer to stop cleanly first, then force-cancels it if needed, so the microphone is less likely to stay latched after a manual stop or while reply audio is starting.
-- Adam Connect now also force-clears Android recognition on app startup and before the spoken-reply test, so stale native listening state is less likely to block reply audio even when the UI already says voice is idle.
-- If the desktop is asleep, use `Host -> Wake Homebase` after you configure the wake relay on the desktop and the always-on LAN node.
-- If you want to email a completed Codex reply outside Adam Connect, add a trusted recipient on `Host`, then use `Email this reply` on the exact assistant message you want to send.
-- Adam Connect can also detect a natural spoken email request such as “email me that link” or “email this to name@example.com”, prepare the draft when the reply finishes, and wait for a final confirmation before it sends.
-- Adam Connect now also tries to understand spoken-form addresses such as `freedom at agoperations dot ca` when speech recognition does not render the literal email characters cleanly.
-- When an email draft is waiting, Adam Connect should say the destination back to you and you can confirm by voice with `yes, send it` or cancel with `cancel`.
+- On Android, Freedom now asks the recognizer to stop cleanly first, then force-cancels it if needed, so the microphone is less likely to stay latched after a manual stop or while reply audio is starting.
+- Freedom now also force-clears Android recognition on app startup and before the spoken-reply test, so stale native listening state is less likely to block reply audio even when the UI already says voice is idle.
+- If the desktop is asleep, use `Overview -> Wake Homebase` after you configure the wake relay on the desktop and the always-on LAN node.
+- If you want to email a completed Codex reply outside Freedom, add a trusted recipient on `Overview`, then use `Email this reply` on the exact assistant message you want to send.
+- Freedom can also detect a natural spoken email request such as “email me that link” or “email this to name@example.com”, prepare the draft when the reply finishes, and wait for a final confirmation before it sends.
+- Freedom now also tries to understand spoken-form addresses such as `freedom at agoperations dot ca` when speech recognition does not render the literal email characters cleanly.
+- When an email draft is waiting, Freedom should say the destination back to you and you can confirm by voice with `yes, send it` or cancel with `cancel`.
 - If you want to edit a typed prompt or email draft manually, open the settings gear in chat to reveal the manual tools without leaving the voice-first view.
-- If you are in a noisy space, use `Mute` in the chat header to keep the voice session alive without continuously listening to your side. Adam Connect will now hold the unfinished spoken turn you already started, then let you continue it after you unmute.
+- If you are in a noisy space, use `Mute` in the chat header to keep the voice session alive without continuously listening to your side. Freedom will now hold the unfinished spoken turn you already started, then let you continue it after you unmute.
 - Outbound email uses the desktop gateway's provider credentials. The phone never stores the sender API key.
-- The chat view now shows a spinning working bubble while Adam Connect is still sending or waiting on a turn, so it is easier to tell the difference between “busy” and “hung”.
+- The chat view now shows a spinning working bubble while Freedom is still sending or waiting on a turn, so it is easier to tell the difference between “busy” and “hung”.
 - If you need to rebuild the Android package after code changes for phone install, rerun `npm run build:android-release`.
 
 ## Day-To-Day Use
 
 1. Start `npm run launch` on the desktop.
-2. Open Adam Connect on the phone.
-3. Confirm the `Host` view shows `Codex ready`.
+2. Open Freedom on the phone.
+3. Confirm the `Overview` view shows `Codex ready`.
 4. Reconnect to your existing paired desktop if needed using the saved URL and stable pairing code.
 5. Use the default `Operator` chat for quick turns, or open a named project chat when you want a separate thread.
 6. Send text prompts or use the live voice loop.

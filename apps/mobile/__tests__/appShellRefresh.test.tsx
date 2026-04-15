@@ -162,22 +162,19 @@ describe("refresh affordances", () => {
     mockStore.setField.mockClear();
   });
 
-  test("AppShell keeps the core navigation and actions visible while staying in chat", async () => {
+  test("AppShell uses the compact chat header while staying in talk mode", async () => {
     let tree: ReactTestRenderer.ReactTestRenderer;
 
     await ReactTestRenderer.act(async () => {
       tree = ReactTestRenderer.create(<AppShell />);
     });
 
-    let labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
+    const labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
 
-    expect(labels).toContain("Overview");
-    expect(labels).toContain("Build");
     expect(labels).toContain("Talk");
     expect(labels).toContain("Voice");
-    expect(labels).toContain("Exit");
-    expect(labels).toContain("Refresh");
-    expect(labels).toContain("Reconnect");
+    expect(labels).toContain("↻");
+    expect(labels).toContain("⚙");
     expect(labels.some((label) => label.includes("Freedom ready"))).toBe(true);
     expect(mockStore.bootstrap).toHaveBeenCalled();
   });
@@ -187,7 +184,26 @@ describe("refresh affordances", () => {
     expect(refreshScrollInteractionProps.alwaysBounceVertical).toBe(true);
   });
 
-  test("Sessions view uses the compact header instead of the large host chrome", async () => {
+  test("host view keeps navigation and primary actions visible in the expanded shell", async () => {
+    mockStore.view = "host";
+
+    let tree: ReactTestRenderer.ReactTestRenderer;
+
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(<AppShell />);
+    });
+
+    const labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
+
+    expect(labels).toContain("Overview");
+    expect(labels).toContain("Build");
+    expect(labels).toContain("Talk");
+    expect(labels).toContain("Start Voice");
+    expect(labels).toContain("Disconnect");
+    expect(labels).toContain("Hide Controls");
+  });
+
+  test("sessions view uses the compact header instead of the large host chrome", async () => {
     mockStore.view = "sessions";
 
     let tree: ReactTestRenderer.ReactTestRenderer;
@@ -200,9 +216,9 @@ describe("refresh affordances", () => {
 
     expect(labels).toContain("Build");
     expect(labels).toContain("Voice");
-    expect(labels).toContain("Overview");
-    expect(labels).toContain("Talk");
-    expect(labels).toContain("Reconnect");
+    expect(labels).toContain("↻");
+    expect(labels).toContain("⚙");
+    expect(labels.some((label) => label.includes("saved"))).toBe(true);
   });
 
   test("shows a mute control while the live voice loop is active", async () => {

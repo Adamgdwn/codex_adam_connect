@@ -22,6 +22,14 @@ interface ActiveRun {
   interrupting: boolean;
 }
 
+const INTERRUPT_START_TIMEOUT_MS = 4_000;
+const INTERRUPT_REQUEST_TIMEOUT_MS = 5_000;
+const GATEWAY_INTERRUPT_TIMEOUT_MS = 3_000;
+const PROCESS_START_TIMEOUT_MS = 5_000;
+const PROCESS_AUTH_TIMEOUT_MS = 4_000;
+const PROCESS_TAILSCALE_TIMEOUT_MS = 4_000;
+const PROCESS_HEARTBEAT_TIMEOUT_MS = 4_000;
+
 export class DesktopHostRuntime {
   private readonly gatewayUrl = process.env.DESKTOP_GATEWAY_URL ?? "http://127.0.0.1:43111";
   private readonly gateway = new HttpGatewayClient(this.gatewayUrl);
@@ -142,7 +150,11 @@ export class DesktopHostRuntime {
         ) {
           this.activeRun.interrupting = true;
           try {
-            await this.codexBridge.interrupt(this.activeRun.threadId, this.activeRun.turnId);
+            await withTimeout(
+              this.codexBridge.interrupt(this.activeRun.threadId, this.activeRun.turnId),
+              INTERRUPT_REQUEST_TIMEOUT_MS,
+              "live interrupt"
+            );
           } catch {
             // Let the gateway reclaim and retry the stop request instead of wedging this run forever.
             this.activeRun.interrupting = false;
@@ -153,19 +165,23 @@ export class DesktopHostRuntime {
 
       const work = await this.gateway.getNextWork(this.hostToken);
       if (work?.type === "interrupt") {
-        await this.codexBridge.start();
+        try {
+          await withTimeout(this.codexBridge.start(), INTERRUPT_START_TIMEOUT_MS, "codex app-server start");
+        } catch {
+          // If the bridge is unhealthy, still clear the stale session state in the gateway.
+        }
         if (work.session.threadId) {
           try {
-            await this.codexBridge.interrupt(work.session.threadId, work.turnId);
+            await withTimeout(this.codexBridge.interrupt(work.session.threadId, work.turnId), INTERRUPT_REQUEST_TIMEOUT_MS, "stale interrupt");
           } catch {
             // If the desktop lost the live turn handle, still clear the stale session state in the gateway.
           }
         }
-        await this.gateway.interruptTurn(this.hostToken, {
+        await withTimeout(this.gateway.interruptTurn(this.hostToken, {
           sessionId: work.session.id,
           assistantMessageId: null,
           turnId: work.turnId
-        });
+        }), GATEWAY_INTERRUPT_TIMEOUT_MS, "gateway interrupt cleanup");
         return;
       }
       if (work?.type === "message") {
@@ -181,27 +197,31 @@ export class DesktopHostRuntime {
       return;
     }
 
-    await this.codexBridge.start();
-    const auth = await this.codexBridge.getAuthState();
-    const tailscale = await getTailscaleStatus(Number(new URL(this.gatewayUrl).port || 43111));
-    await this.gateway.heartbeat(this.hostToken, { auth, tailscale });
-
-    if (auth.status !== "logged_in") {
-      await this.gateway.failTurn(this.hostToken, {
-        sessionId: work.session.id,
-        userMessageId: work.message.id,
-        assistantMessageId: null,
-        threadId: work.session.threadId,
-        turnId: null,
-        errorMessage: auth.detail ?? "Codex is not logged in. Run `codex login --device-auth` on the desktop."
-      });
-      return;
-    }
-
     const assistantMessageId = createId("msg");
     let started = false;
 
     try {
+      await withTimeout(this.codexBridge.start(), PROCESS_START_TIMEOUT_MS, "codex app-server start");
+      const auth = await withTimeout(this.codexBridge.getAuthState(), PROCESS_AUTH_TIMEOUT_MS, "codex auth check");
+      const tailscale = await withTimeout(
+        getTailscaleStatus(Number(new URL(this.gatewayUrl).port || 43111)),
+        PROCESS_TAILSCALE_TIMEOUT_MS,
+        "tailscale status"
+      );
+      await withTimeout(this.gateway.heartbeat(this.hostToken, { auth, tailscale }), PROCESS_HEARTBEAT_TIMEOUT_MS, "gateway heartbeat");
+
+      if (auth.status !== "logged_in") {
+        await this.gateway.failTurn(this.hostToken, {
+          sessionId: work.session.id,
+          userMessageId: work.message.id,
+          assistantMessageId: null,
+          threadId: work.session.threadId,
+          turnId: null,
+          errorMessage: auth.detail ?? "Codex is not logged in. Run `codex login --device-auth` on the desktop."
+        });
+        return;
+      }
+
       const runTurn = async (threadId: string | null) =>
         this.codexBridge.runTurn({
           cwd: work.session.rootPath,
@@ -296,6 +316,23 @@ export class DesktopHostRuntime {
 
 function isMissingThreadError(message: string): boolean {
   return /thread not found/i.test(message);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let handle: NodeJS.Timeout | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    handle = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (handle) {
+      clearTimeout(handle);
+    }
+  }
 }
 
 function parseRoots(raw: string | undefined): string[] {

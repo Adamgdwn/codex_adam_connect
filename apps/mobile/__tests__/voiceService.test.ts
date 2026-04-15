@@ -41,7 +41,7 @@ describe("VoiceService", () => {
     expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalledTimes(1);
   });
 
-  test("finalizes the latest transcript and restarts recognition after an unexpected end", async () => {
+  test("restarts recognition after an unexpected end without resetting the recognizer", async () => {
     const service = new VoiceService();
     const onFinalTranscript = jest.fn();
     const onReconnect = jest.fn();
@@ -51,6 +51,9 @@ describe("VoiceService", () => {
       onReconnect,
       onError: jest.fn()
     });
+    (ExpoSpeechRecognitionModule.start as jest.Mock).mockClear();
+    (ExpoSpeechRecognitionModule.stop as jest.Mock).mockClear();
+    (ExpoSpeechRecognitionModule.abort as jest.Mock).mockClear();
 
     const resultListener = getListener("result");
     const endListener = getListener("end");
@@ -61,15 +64,14 @@ describe("VoiceService", () => {
     });
     endListener();
 
-    expect(onFinalTranscript).toHaveBeenCalledWith("resume after the pause");
     expect(onReconnect).toHaveBeenCalledTimes(1);
 
-    jest.advanceTimersByTime(260);
-    jest.advanceTimersByTime(140);
+    jest.advanceTimersByTime(200);
 
-    expect(ExpoSpeechRecognitionModule.stop).toHaveBeenCalled();
-    expect(ExpoSpeechRecognitionModule.abort).toHaveBeenCalled();
-    expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledTimes(2);
+    expect(onFinalTranscript).not.toHaveBeenCalled();
+    expect(ExpoSpeechRecognitionModule.stop).not.toHaveBeenCalled();
+    expect(ExpoSpeechRecognitionModule.abort).not.toHaveBeenCalled();
+    expect(ExpoSpeechRecognitionModule.start).toHaveBeenCalledTimes(1);
   });
 });
 

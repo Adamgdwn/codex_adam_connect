@@ -39,6 +39,8 @@ This keeps the current trust boundary the same: the phone still does not hold mo
   `idle`, `connecting`, `listening`, `user-speaking`, `processing`, `assistant-speaking`, `interrupted`, `reconnecting`, `review`, `error`
 - Short acknowledgements such as `yeah`, `okay`, and `uh huh` are treated as backchannel instead of automatic interruption.
 - Substantive speech while the assistant is talking triggers a stop request through the existing session stop path.
+- The recognizer now stays alive during spoken replies so explicit barge-in can work again while Freedom is speaking.
+- Interruption filtering is now stricter about likely assistant-echo pickup, so Freedom is less likely to hear its own spoken reply and stop itself.
 
 ### Assistant speech
 
@@ -50,6 +52,7 @@ This keeps the current trust boundary the same: the phone still does not hold mo
 
 - The chat screen now exposes a dedicated `Voice Loop` panel with phase, live transcript, assistant preview, audio meter, turn counts, interruption counts, reconnect counts, and latest round-trip timing.
 - The header voice control now starts and ends a continuous session instead of acting like a one-shot mic capture.
+- The spoken-reply voice picker now surfaces accent, engine, quality, and any safe style or gender hints the device actually exposes, so voice choice no longer requires pure trial and error.
 
 ## Safety Notes
 

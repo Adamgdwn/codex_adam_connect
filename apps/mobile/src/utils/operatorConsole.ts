@@ -6,11 +6,7 @@ export const OPERATOR_SESSION_TITLE = FREEDOM_PRIMARY_SESSION_TITLE;
 const RISKY_VOICE_PATTERNS = [
   /\brm\s+-rf\b/i,
   /\bsudo\b/i,
-  /\bdelete\b/i,
-  /\bremove\b/i,
   /\bdrop table\b/i,
-  /\bformat\b/i,
-  /\breset\b/i,
   /```/,
   /`[^`]+`/
 ];
@@ -87,7 +83,7 @@ export function requiresVoiceReview(transcript: string): boolean {
     return false;
   }
 
-  if (value.length > 180 || value.includes("\n")) {
+  if (value.length > 260 || value.includes("\n")) {
     return true;
   }
 

@@ -101,9 +101,9 @@ export function PairingScreen(props: {
 export function HostScreen(props: {
   store: AppState;
   onRefresh(): void;
-  insetBottom: number;
+  bottomPadding: number;
 }): React.JSX.Element {
-  const { store, onRefresh, insetBottom } = props;
+  const { store, onRefresh, bottomPadding } = props;
   const currentDevice = store.devices.find((device) => device.id === store.currentDeviceId) ?? null;
   const selectedVoice = store.assistantVoices.find((voice) => voice.id === store.selectedAssistantVoiceId) ?? null;
   const outboundEmail = store.hostStatus?.outboundEmail ?? null;
@@ -113,7 +113,7 @@ export function HostScreen(props: {
   return (
     <ScrollView
       style={styles.screenContent}
-      contentContainerStyle={[styles.content, { paddingBottom: Math.max(insetBottom, 16) + 16 }]}
+      contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
       refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={onRefresh} tintColor="#0f766e" progressViewOffset={12} />}
       {...refreshScrollInteractionProps}
     >
@@ -228,13 +228,16 @@ export function HostScreen(props: {
                 <Text style={[styles.optionChipLabel, store.selectedAssistantVoiceId === voice.id ? styles.optionChipLabelActive : null]}>
                   {voice.label}
                 </Text>
+                <Text style={[styles.optionChipMeta, store.selectedAssistantVoiceId === voice.id ? styles.optionChipMetaActive : null]}>
+                  {summarizeVoiceOption(voice)}
+                </Text>
               </Pressable>
             ))}
           </View>
           <Text style={styles.helperText}>
             {selectedVoice
               ? `Current spoken reply voice: ${describeVoiceOption(selectedVoice)}.`
-              : "Automatic uses the phone's best available English voice."}
+              : "Automatic uses the phone's best available English voice. Freedom now labels accent, quality, style, and whether Android exposes a gender hint for each voice."}
           </Text>
         </View>
         <View style={styles.insetCard}>
@@ -1015,10 +1018,90 @@ function humanizeSessionKind(kind: "operator" | "project" | "admin" | "build" | 
 }
 
 function describeVoiceOption(voice: TtsVoiceOption): string {
-  const details = [voice.language];
+  const details = [
+    `${humanizeVoiceLocale(voice.language)} accent`,
+    voice.backend === "react-native-tts" ? "Native Android engine" : "Expo speech engine"
+  ];
   if (voice.qualityLabel) {
-    details.push(voice.qualityLabel);
+    details.push(`${voice.qualityLabel} quality`);
+  }
+  details.push(inferVoiceGender(voice));
+
+  const style = inferVoiceStyle(voice);
+  if (style) {
+    details.push(style);
   }
 
   return `${voice.label} (${details.join(" • ")})`;
+}
+
+function summarizeVoiceOption(voice: TtsVoiceOption): string {
+  const details = [`${humanizeVoiceLocale(voice.language)} accent`];
+  if (voice.qualityLabel) {
+    details.push(`${voice.qualityLabel} quality`);
+  }
+  details.push(inferVoiceGender(voice));
+
+  const style = inferVoiceStyle(voice);
+  if (style) {
+    details.push(style);
+  }
+  return details.join(" • ");
+}
+
+function humanizeVoiceLocale(language: string): string {
+  const normalized = language.replace("_", "-").toLowerCase();
+  switch (normalized) {
+    case "en-us":
+      return "English US";
+    case "en-gb":
+      return "English UK";
+    case "en-au":
+      return "English AU";
+    case "en-ca":
+      return "English CA";
+    case "en-in":
+      return "English IN";
+    case "en-ie":
+      return "English IE";
+    case "en-nz":
+      return "English NZ";
+    case "en-za":
+      return "English ZA";
+    default:
+      return language.toUpperCase();
+  }
+}
+
+function inferVoiceGender(voice: TtsVoiceOption): string {
+  const haystack = `${voice.label} ${voice.nativeIdentifier ?? ""}`.toLowerCase();
+  if (/\bfemale\b|\bwoman\b|\bgirl\b/.test(haystack)) {
+    return "likely female";
+  }
+  if (/\bmale\b|\bman\b|\bboy\b/.test(haystack)) {
+    return "likely male";
+  }
+
+  return "gender not exposed";
+}
+
+function inferVoiceStyle(voice: TtsVoiceOption): string | null {
+  const haystack = `${voice.label} ${voice.nativeIdentifier ?? ""}`.toLowerCase();
+  if (/\bneural\b/.test(haystack)) {
+    return "neural style";
+  }
+  if (/\bnatural\b/.test(haystack)) {
+    return "natural style";
+  }
+  if (/\bstudio\b/.test(haystack)) {
+    return "studio style";
+  }
+  if (/\bcompact\b/.test(haystack)) {
+    return "compact style";
+  }
+  if (/\benhanced\b/.test(haystack)) {
+    return "richer style";
+  }
+
+  return null;
 }

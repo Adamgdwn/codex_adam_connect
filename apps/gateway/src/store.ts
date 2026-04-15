@@ -121,6 +121,8 @@ const defaultNotificationPrefs: NotificationPrefs = {
 };
 
 const INTERRUPT_RECLAIM_MS = 5_000;
+const STALE_STOP_RECOVERY_MS = 20_000;
+const STALE_QUEUE_CLAIM_MS = 15_000;
 
 const defaultState = (): GatewayState => ({
   hosts: [],
@@ -761,6 +763,9 @@ export class GatewayStore {
         this.emitMessage(principal.host.id, pending);
       }
       targetSession.status = "idle";
+      targetSession.stopRequested = false;
+      targetSession.stopClaimedAt = null;
+      targetSession.claimedMessageId = null;
       targetSession.updatedAt = nowIso();
     }
 
@@ -999,6 +1004,9 @@ export class GatewayStore {
       assistantMessage.status = "interrupted";
       assistantMessage.updatedAt = nowIso();
       assistantMessage.errorMessage = "Run stopped from Freedom.";
+      if (!assistantMessage.content.trim()) {
+        session.threadId = null;
+      }
       this.emitMessage(principal.host.id, assistantMessage);
     }
 
@@ -1506,6 +1514,7 @@ export class GatewayStore {
 
   private async readState(): Promise<GatewayState> {
     if (this.state) {
+      recoverStaleSessionStops(this.state);
       return this.state;
     }
 
@@ -1513,6 +1522,7 @@ export class GatewayStore {
     try {
       const raw = await readFile(this.dataFile, "utf8");
       this.state = migrateState(JSON.parse(raw) as Partial<GatewayState>);
+      recoverStaleSessionStops(this.state);
     } catch {
       this.state = defaultState();
       await this.writeState(this.state);
@@ -1558,6 +1568,70 @@ export class GatewayStore {
       session.deviceId = device.id;
       session.updatedAt = recoveredAt;
     }
+  }
+}
+
+function recoverStaleSessionStops(state: GatewayState): void {
+  const recoveredAt = nowIso();
+  let changed = false;
+
+  for (const session of state.sessions) {
+    if (session.status === "queued" && session.claimedMessageId && !session.activeTurnId) {
+      const claimedMessage = state.messages.find((message) => message.id === session.claimedMessageId && message.sessionId === session.id);
+      const claimedAtMs = Date.parse(claimedMessage?.updatedAt ?? claimedMessage?.createdAt ?? session.updatedAt);
+      if (!claimedMessage || claimedMessage.status !== "pending" || !Number.isFinite(claimedAtMs) || Date.now() - claimedAtMs >= STALE_QUEUE_CLAIM_MS) {
+        session.claimedMessageId = null;
+        session.updatedAt = recoveredAt;
+        session.lastActivityAt = recoveredAt;
+        changed = true;
+      }
+    }
+
+    if (session.status !== "stopping" || !session.stopRequested || !session.stopClaimedAt) {
+      continue;
+    }
+
+    const claimedAtMs = Date.parse(session.stopClaimedAt);
+    if (!Number.isFinite(claimedAtMs) || Date.now() - claimedAtMs < STALE_STOP_RECOVERY_MS) {
+      continue;
+    }
+
+    session.activeTurnId = null;
+    session.status = "idle";
+    session.stopRequested = false;
+    session.stopClaimedAt = null;
+    session.claimedMessageId = null;
+    session.updatedAt = recoveredAt;
+    session.lastActivityAt = recoveredAt;
+    changed = true;
+
+    const assistantMessage = [...state.messages]
+      .reverse()
+      .find((message) => message.sessionId === session.id && message.role === "assistant" && message.status === "streaming");
+
+    if (assistantMessage) {
+      assistantMessage.status = "interrupted";
+      assistantMessage.errorMessage = "Recovered from a stale stop request.";
+      assistantMessage.updatedAt = recoveredAt;
+      if (!assistantMessage.content.trim()) {
+        session.threadId = null;
+      }
+    }
+  }
+
+  if (changed) {
+    state.auditEvents.unshift({
+      id: createId("audit"),
+      hostId: state.sessions.find((session) => session.hostId)?.hostId ?? "",
+      deviceId: null,
+      sessionId: null,
+      type: "repair_needed",
+      originSurface: null,
+      auditCorrelationId: null,
+      detail: "Recovered stale stopping session state.",
+      createdAt: recoveredAt
+    });
+    state.auditEvents = state.auditEvents.slice(0, 200);
   }
 }
 

@@ -30,6 +30,19 @@ describe("TtsService", () => {
     expect(ReactNativeTts.setDefaultLanguage).toHaveBeenCalledWith("en-GB");
   });
 
+  test("reinitializes the backend when switching to a different voice", async () => {
+    const service = new TtsService();
+
+    await service.setPreferredVoice("en-us-standard");
+    jest.clearAllMocks();
+
+    await service.setPreferredVoice("en-gb-enhanced");
+
+    expect(ReactNativeTts.stop).toHaveBeenCalledTimes(1);
+    expect(ReactNativeTts.getInitStatus).toHaveBeenCalledTimes(1);
+    expect(ReactNativeTts.setDefaultVoice).toHaveBeenCalledWith("en-gb-enhanced");
+  });
+
   test("falls back to the automatic English voice when the selection is cleared", async () => {
     const service = new TtsService();
 

@@ -94,6 +94,37 @@ type SpeechHandlers = {
   onError?(message: string): void;
 };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(fallback);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
+
 function getReactNativeTtsModule(): ReactNativeTtsModule | null {
   try {
     return require("react-native-tts").default as ReactNativeTtsModule;
@@ -137,10 +168,15 @@ export class TtsService {
     }
 
     if (!this.initPromise) {
-      this.initPromise = this.initialize();
+      this.initPromise = withTimeout(this.initialize(), 1800, false);
     }
 
-    return this.initPromise;
+    const ready = await this.initPromise;
+    if (!ready) {
+      this.initPromise = null;
+    }
+
+    return ready;
   }
 
   async listVoices(): Promise<TtsVoiceOption[]> {
@@ -158,7 +194,15 @@ export class TtsService {
   }
 
   async setPreferredVoice(voiceId: string | null): Promise<TtsVoiceOption | null> {
+    const voiceChanged = this.preferredVoiceId !== voiceId;
     this.preferredVoiceId = voiceId;
+    if (voiceChanged) {
+      this.stop();
+      this.initPromise = null;
+      this.lastSuccessfulBackend = null;
+      this.lastAttemptedBackend = null;
+    }
+
     const ready = await this.prepare();
     if (!ready) {
       return null;
@@ -307,7 +351,10 @@ export class TtsService {
   }
 
   private defaultBackendOrder(): SpeechBackend[] {
-    return Platform.OS === "android" ? ["expo-speech", "react-native-tts"] : ["react-native-tts", "expo-speech"];
+    // Android has been more reliable with the native TTS bridge than Expo speech
+    // for continuous companion-mode replies, so prefer it first and fall back only
+    // when the native engine is unavailable.
+    return Platform.OS === "android" ? ["react-native-tts", "expo-speech"] : ["react-native-tts", "expo-speech"];
   }
 
   private async initializeExpoSpeech(): Promise<boolean> {
@@ -333,8 +380,16 @@ export class TtsService {
     }
 
     try {
-      await this.reactNativeTts.getInitStatus?.();
-      const engines = (await this.reactNativeTts.engines?.().catch(() => [])) ?? [];
+      const initReady = await withTimeout(
+        Promise.resolve(this.reactNativeTts.getInitStatus?.().catch(() => false) ?? true).then((value) => value === true || value === "success"),
+        1200,
+        false
+      );
+      if (!initReady) {
+        return false;
+      }
+
+      const engines = await withTimeout(Promise.resolve(this.reactNativeTts.engines?.().catch(() => []) ?? []), 1200, []);
       const defaultEngine = engines.find((engine) => engine.default) ?? engines[0];
       if (defaultEngine?.name) {
         await this.reactNativeTts.setDefaultEngine?.(defaultEngine.name).catch(() => true);
@@ -472,7 +527,8 @@ export class TtsService {
   }
 
   private async getExpoVoiceOptions(): Promise<TtsVoiceOption[]> {
-    const voices = (await this.expoSpeech?.getAvailableVoicesAsync?.().catch(() => [])) ?? [];
+    const voices =
+      (await withTimeout(Promise.resolve(this.expoSpeech?.getAvailableVoicesAsync?.().catch(() => []) ?? []), 1200, [])) ?? [];
     return voices
       .map((voice, index) => ({
         id: voice.identifier ?? `${voice.language ?? "unknown"}:${voice.name ?? index}`,
@@ -486,7 +542,8 @@ export class TtsService {
   }
 
   private async getReactNativeVoiceOptions(): Promise<TtsVoiceOption[]> {
-    const voices = (await this.reactNativeTts?.voices?.().catch(() => [])) ?? [];
+    const voices =
+      (await withTimeout(Promise.resolve(this.reactNativeTts?.voices?.().catch(() => []) ?? []), 1200, [])) ?? [];
     return voices
       .filter((voice) => !voice.notInstalled)
       .map((voice) => ({

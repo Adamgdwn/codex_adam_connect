@@ -2,12 +2,13 @@
 
 ## Now
 
-- make Adam Connect feel like a persistent remote operator console for desktop Codex
+- make Freedom Companion feel like a persistent remote operator console for desktop Freedom/Codex
 - harden pairing persistence and recovery so the phone stays usable across normal desktop restarts
 - make the default `Operator` chat the low-friction path for quick voice and text turns
-- improve voice/TTS reliability, visible state, and safe send behavior
+- improve duplex voice/TTS reliability, visible state, interruption quality, and safe auto-send behavior
 - improve shared phone/desktop status, retry messaging, and chat readability
 - reduce monolith risk in the mobile UI by stopping further growth of `apps/mobile/src/app/AppShell.tsx`
+- make the `Build` surface useful enough for real project kickoff from the phone, not just session management
 
 ## Next
 
@@ -28,13 +29,14 @@
 
 ### Just Completed
 
-- browser dashboard became the supported desktop GUI
+- the native Electron shell became the supported desktop GUI, with the browser page kept as a fallback install and recovery surface
 - one-command launch and Linux launcher install path landed
-- the phone now has persistent pairing tokens, a stable restart-safe pairing code, and a default `Operator` chat path
+- the phone now has persistent pairing tokens, a stable restart-safe pairing code, and Freedom-branded `Overview`, `Build`, and `Talk` surfaces
 - the desktop and phone share richer session/status recovery behavior than the original MVP
+- the mobile voice loop regained real barge-in behavior and richer spoken-reply voice selection metadata
 
 ### Coming Next
 
 - complete one more real-phone acceptance pass focused on the operator loop
-- tighten voice send/reply behavior so the phone feels like a natural coworker console
+- tighten duplex voice send/reply behavior so the phone feels like a natural coworker console without self-hearing
 - break up the largest mixed-purpose mobile UI/state files while preserving current behavior

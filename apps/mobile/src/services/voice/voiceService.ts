@@ -94,7 +94,6 @@ export class VoiceService {
   private latestTranscript = "";
   private sessionActive = false;
   private manualStopRequested = false;
-  private restarting = false;
   private callbacks: VoiceCallbacks | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private forceAbortTimer: ReturnType<typeof setTimeout> | null = null;
@@ -136,7 +135,6 @@ export class VoiceService {
     this.callbacks = callbacks;
     this.sessionActive = true;
     this.manualStopRequested = false;
-    this.restarting = false;
     this.latestTranscript = "";
     this.attachListeners();
     this.startRecognition();
@@ -146,7 +144,6 @@ export class VoiceService {
     const speechRecognitionModule = getSpeechRecognitionModule();
     this.manualStopRequested = true;
     this.sessionActive = false;
-    this.restarting = false;
     this.clearReconnectTimer();
     this.clearForceAbortTimer();
 
@@ -222,10 +219,6 @@ export class VoiceService {
       }),
       speechRecognitionModule.addListener("error", (event?: unknown) => {
         const errorEvent = event as ExpoSpeechRecognitionErrorEvent;
-        if (this.restarting) {
-          return;
-        }
-
         if (this.latestTranscript && (errorEvent.error === "no-speech" || errorEvent.error === "speech-timeout")) {
           this.callbacks?.onFinalTranscript?.(this.latestTranscript);
           this.latestTranscript = "";
@@ -241,18 +234,9 @@ export class VoiceService {
         this.callbacks?.onError(formatVoiceError(errorEvent));
       }),
       speechRecognitionModule.addListener("end", () => {
-        if (this.restarting) {
-          return;
-        }
-
-        if (this.latestTranscript) {
-          this.callbacks?.onFinalTranscript?.(this.latestTranscript);
-          this.latestTranscript = "";
-        }
-
         if (this.sessionActive && !this.manualStopRequested) {
           this.callbacks?.onReconnect?.();
-          this.restartRecognition(260);
+          this.restartRecognition(200);
         }
       })
     ];
@@ -267,7 +251,6 @@ export class VoiceService {
     }
 
     try {
-      this.restarting = false;
       speechRecognitionModule.start({
         lang: "en-US",
         interimResults: true,
@@ -296,33 +279,8 @@ export class VoiceService {
         return;
       }
 
-      this.restarting = true;
-      this.resetRecognizer();
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        if (!this.sessionActive || this.manualStopRequested) {
-          this.restarting = false;
-          return;
-        }
-
-        this.startRecognition();
-      }, Platform.OS === "android" ? 140 : 60);
+      this.startRecognition();
     }, delayMs);
-  }
-
-  private resetRecognizer(): void {
-    const speechRecognitionModule = getSpeechRecognitionModule();
-    try {
-      speechRecognitionModule?.stop();
-    } catch {
-      // Ignore reset failures while trying to recover the native recognizer.
-    }
-
-    try {
-      speechRecognitionModule?.abort();
-    } catch {
-      // Ignore abort failures while trying to recover the native recognizer.
-    }
   }
 
   private clearReconnectTimer(): void {

@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { Platform } from "react-native";
 import { buildProjectStarterPrompt } from "@adam-connect/shared";
 import type {
   ChatMessage,
@@ -52,6 +51,7 @@ import {
   type ParsedExternalSendRequest
 } from "../utils/externalSend";
 import {
+  isLikelyAssistantEcho,
   type VoiceSessionPhase,
   mergeVoiceTranscriptSegments,
   normalizeVoiceTranscript,
@@ -202,7 +202,9 @@ const wakeRelay = new WakeRelayClient();
 let socket: WebSocket | null = null;
 let unsubscribePushTokenRefresh: (() => void) | null = null;
 let voiceInterruptRequested = false;
-const SHOULD_PAUSE_RECOGNITION_DURING_TTS = Platform.OS === "android";
+// Keep recognition live during spoken replies so voice barge-in works on phone.
+// Assistant-echo filtering prevents Freedom's own TTS from self-interrupting.
+const SHOULD_PAUSE_RECOGNITION_DURING_TTS = false;
 const VOICE_CONTINUATION_GRACE_MS = 1400;
 let pendingVoiceTranscript: string | null = null;
 let pendingVoiceCommitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,6 +218,37 @@ const defaultVoiceTelemetry = (): VoiceTelemetry => ({
   lastAssistantStartedAt: null,
   lastRoundTripMs: null
 });
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(fallback);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
 
 function normalizeStoredSettings(settings: Partial<StoredSettings> & Pick<StoredSettings, "baseUrl" | "deviceName" | "autoSpeak" | "autoSendVoice">): StoredSettings {
   return {
@@ -252,10 +285,10 @@ async function loadAssistantVoiceState(preferredVoiceId: string | null): Promise
   selectedAssistantVoiceId: string | null;
 }> {
   await tts.prepare(preferredVoiceId).catch(() => false);
-  await tts.setPreferredVoice(preferredVoiceId).catch(() => null);
+  const appliedVoice = await tts.setPreferredVoice(preferredVoiceId).catch(() => null);
   const assistantVoices = await tts.listVoices().catch(() => []);
   const selectedAssistantVoiceId =
-    preferredVoiceId && assistantVoices.some((voiceOption) => voiceOption.id === preferredVoiceId) ? preferredVoiceId : null;
+    preferredVoiceId && appliedVoice?.id && assistantVoices.some((voiceOption) => voiceOption.id === appliedVoice.id) ? appliedVoice.id : null;
 
   return {
     assistantVoices,
@@ -364,12 +397,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     const [settings, token, voiceAvailable] = await Promise.all([
-      loadSettings(),
-      loadDeviceToken(),
-      voice.isAvailable()
+      settleWithin(loadSettings(), 1200, null),
+      settleWithin(loadDeviceToken(), 1200, null),
+      settleWithin(voice.isAvailable(), 1200, false)
     ]);
 
-    const assistantVoiceState = await loadAssistantVoiceState(settings?.assistantVoiceId ?? null);
+    const assistantVoiceState = await settleWithin(
+      loadAssistantVoiceState(settings?.assistantVoiceId ?? null),
+      1800,
+      {
+        assistantVoices: [],
+        selectedAssistantVoiceId: null
+      }
+    );
     if (settings?.assistantVoiceId && assistantVoiceState.selectedAssistantVoiceId === null) {
       await saveSettings({
         ...normalizeStoredSettings({
@@ -1350,6 +1390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await persistSettings(get, {
       assistantVoiceId: assistantVoiceState.selectedAssistantVoiceId
     });
+    const requestedVoice = voiceId ? assistantVoiceState.assistantVoices.find((voiceOption) => voiceOption.id === voiceId) ?? null : null;
     const selectedVoice =
       assistantVoiceState.assistantVoices.find((voiceOption) => voiceOption.id === assistantVoiceState.selectedAssistantVoiceId) ?? null;
     set({
@@ -1357,6 +1398,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
       notice: selectedVoice
         ? `Spoken reply voice set to ${selectedVoice.label}. Use Test Spoken Reply to preview it.`
+        : requestedVoice
+          ? `Tried to switch to ${requestedVoice.label}, but the phone did not confirm the change. Test Spoken Reply may still be using the current default voice.`
         : `Spoken reply voice reset to automatic. ${FREEDOM_RUNTIME_NAME} will use the phone's default English voice.`,
       error: null
     });
@@ -1436,6 +1479,15 @@ function buildVoiceSessionCallbacks(
       const merged = pendingVoiceTranscript ? mergeVoiceTranscriptSegments(pendingVoiceTranscript, normalized) : normalized;
       pendingVoiceTranscript = merged;
 
+      if (isVoiceAssistantActive(get) && isLikelyAssistantEcho(merged, get().voiceAssistantDraft ?? "")) {
+        set({
+          liveTranscript: "",
+          voiceAudioLevel: -2,
+          voiceSessionPhase: "assistant-speaking"
+        });
+        return;
+      }
+
       set((state) => ({
         liveTranscript: merged,
         voiceSessionPhase: "user-speaking",
@@ -1471,6 +1523,12 @@ function buildVoiceSessionCallbacks(
 
       const merged = pendingVoiceTranscript ? mergeVoiceTranscriptSegments(pendingVoiceTranscript, normalized) : normalized;
       pendingVoiceTranscript = merged;
+
+      if (isVoiceAssistantActive(get) && isLikelyAssistantEcho(merged, get().voiceAssistantDraft ?? "")) {
+        clearPendingVoiceTranscript();
+        set({ liveTranscript: "", voiceAudioLevel: -2, voiceSessionPhase: "assistant-speaking" });
+        return;
+      }
 
       if (isVoiceAssistantActive(get) && !voiceInterruptRequested && !shouldInterruptAssistant(merged, VOICE_INTERRUPT_MIN_CHARS, VOICE_BACKCHANNEL_MAX_WORDS)) {
         clearPendingVoiceTranscript();

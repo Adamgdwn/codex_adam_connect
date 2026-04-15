@@ -1,6 +1,6 @@
 # Status
 
-## Checkpoint: 2026-04-11
+## Checkpoint: 2026-04-14
 
 ### What Just Completed
 
@@ -9,7 +9,10 @@
 - the shell-facing desktop surface now shows `Operator`, `Activity`, `Devices`, `Workspaces`, and `Settings`
 - a Linux desktop launcher installer now exists through `npm run app:desktop:install-launcher`
 - the gateway now issues short-lived realtime tickets for websocket auth instead of reusing long-lived device tokens directly
-- the phone now has a default `Operator` chat path, safer voice auto-send review, clearer message rendering, and a tighter messaging-style chat layout
+- the phone now presents `Overview`, `Build`, and `Talk` as the main companion surfaces instead of the older host/chat split
+- Android spoken replies now prefer the native text-to-speech backend again, with Expo still available as a fallback
+- the live voice loop now supports real barge-in again while Freedom is speaking, and the interruption filter is stricter about likely assistant-echo pickup
+- the mobile voice picker now labels accent, engine, quality, and any safe style or gender hints exposed by Android
 - stale phone tokens can now enter a repair flow that preserves saved desktop settings instead of forcing a full cold start
 - busy chats and `Stop` recovery now clear more reliably even after desktop-side run-handle loss or app-server interrupt stalls
 
@@ -25,17 +28,19 @@
 - stable pairing codes across normal desktop restarts
 - default operator-chat recovery and pinned operator sorting on the phone
 - mobile `Stop` and busy-state recovery across stale desktop runs
-- compact chat-first phone UI with persistent top-right talk/settings controls
+- compact phone chrome with persistent voice control and a dedicated `Build` surface
+- installable Android release APKs built from `npm run build:android-release`
 
 ### What Is Still In Progress
 
 - iOS still needs real-device validation and packaging validation
 - real-phone acceptance should be rerun against the latest operator-loop flow before calling the release path settled
+- duplex voice still needs more refinement so speaker bleed is filtered without making barge-in feel sluggish
 - `apps/mobile/src/store/appStore.ts` is still a large mixed-purpose state coordinator that needs further decomposition
 
 ### What Should Happen Next
 
-1. Run a full real-phone operator-loop pass, including repair-mode recovery and risky-voice-review behavior.
+1. Run another real-phone pass focused on duplex voice: reply audio, self-echo filtering, and interruption timing.
 2. Keep decomposing the largest mixed-purpose mobile state code while preserving the current operator flow.
 3. Validate iOS build and packaging on a real Apple build environment.
-4. Keep widening device-management, notification, and recovery coverage from the new shell-first baseline.
+4. Keep widening device-management, notification, and recovery coverage from the shell-first baseline.

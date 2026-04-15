@@ -1,7 +1,68 @@
 import { StyleSheet } from "react-native";
 
 export const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#e7eef8", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10 },
+  root: { flex: 1, backgroundColor: "#dfe7f3" },
+  mobileShell: { flex: 1, paddingHorizontal: 12, paddingTop: 10, gap: 10 },
+  mobileTopBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    backgroundColor: "rgba(246, 250, 255, 0.82)",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "rgba(20, 52, 92, 0.08)"
+  },
+  mobileIdentity: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 12 },
+  mobileIdentityMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: "#12325b",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  mobileIdentityMarkLabel: { color: "#f8fbff", fontWeight: "800", fontSize: 22 },
+  mobileIdentityCopy: { flex: 1, minWidth: 0, gap: 2 },
+  mobileIdentityTitle: { color: "#10233e", fontSize: 20, lineHeight: 22, fontWeight: "800" },
+  mobileIdentitySubtitle: { color: "#60728b", fontSize: 12, lineHeight: 16 },
+  mobileQuickActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  mobileQuickAction: {
+    minWidth: 52,
+    height: 44,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(18, 50, 91, 0.08)"
+  },
+  mobileQuickActionLabel: { color: "#10233e", fontSize: 20, fontWeight: "800" },
+  mobileQuickActionText: { color: "#10233e", fontSize: 13, fontWeight: "800" },
+  mobileStatusStrip: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  mobileViewport: { flex: 1, minHeight: 0 },
+  mobileDock: {
+    flexDirection: "row",
+    gap: 10,
+    backgroundColor: "rgba(15, 32, 56, 0.94)",
+    borderRadius: 22,
+    paddingHorizontal: 10,
+    paddingTop: 10
+  },
+  mobileDockButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  mobileDockButtonActive: { backgroundColor: "#4da7d3" },
+  mobileDockLabel: { color: "#c6d8ea", fontWeight: "800", fontSize: 15 },
+  mobileDockLabelActive: { color: "#0c213a" },
   heroCard: {
     backgroundColor: "#0b1526",
     borderRadius: 12,
@@ -167,7 +228,9 @@ export const styles = StyleSheet.create({
     marginBottom: 10
   },
   shellHeaderTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
+  shellHeaderTopStacked: { flexDirection: "column", alignItems: "stretch" },
   shellBrandCluster: { flex: 1, minWidth: 0, flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  shellBrandClusterStacked: { width: "100%" },
   shellBrandMark: {
     width: 40,
     height: 40,
@@ -179,8 +242,10 @@ export const styles = StyleSheet.create({
   shellBrandMarkLabel: { color: "#eff6ff", fontSize: 18, fontWeight: "800" },
   shellBrandCopy: { flex: 1, minWidth: 0, gap: 2 },
   shellBrandTitle: { fontSize: 24, lineHeight: 26, fontWeight: "800", color: "#10233e" },
+  shellBrandTitleCompact: { fontSize: 22, lineHeight: 24 },
   shellBrandSubtitle: { color: "#5a6d87", fontSize: 13, lineHeight: 18 },
   shellHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" },
+  shellHeaderActionsStacked: { width: "100%", justifyContent: "flex-start" },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 },
   headerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
   headerActions: { alignItems: "flex-end", gap: 8 },
@@ -211,6 +276,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(18, 50, 91, 0.08)"
   },
+  iconButtonWide: { minWidth: 88, flexGrow: 1 },
   iconButtonLabel: { color: "#10233e", fontWeight: "800", fontSize: 13 },
   warningIconButton: { backgroundColor: "#fff2d8" },
   topPanel: {
@@ -229,7 +295,9 @@ export const styles = StyleSheet.create({
   heroBody: { color: "#cedcf0", lineHeight: 22, fontSize: 15 },
   subtitle: { color: "#5a6d87", marginTop: 2, fontSize: 15 },
   nav: { flexDirection: "row", gap: 8 },
+  navCompact: { flexWrap: "wrap" },
   topActions: { flexDirection: "row", gap: 8 },
+  topActionsStacked: { flexDirection: "column" },
   navButton: {
     flex: 1,
     borderRadius: 8,
@@ -239,6 +307,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(18, 50, 91, 0.04)"
   },
+  navButtonCompact: { minWidth: "31%" },
   navButtonActive: { backgroundColor: "#14345d" },
   navLabel: { color: "#3d526d", fontWeight: "700" },
   navLabelActive: { color: "#ffffff" },
@@ -289,6 +358,7 @@ export const styles = StyleSheet.create({
     justifyContent: "center"
   },
   topActionButton: { width: "100%" },
+  topActionButtonStacked: { width: "100%" },
   secondaryLabel: { color: "#1b4f82", fontWeight: "800" },
   warningButton: { backgroundColor: "#fff2d8" },
   warningButtonLabel: { color: "#9a5b1a" },
@@ -365,6 +435,8 @@ export const styles = StyleSheet.create({
   optionChipActive: { backgroundColor: "#14345d" },
   optionChipLabel: { color: "#334b66", fontWeight: "700", fontSize: 12 },
   optionChipLabelActive: { color: "#ffffff" },
+  optionChipMeta: { color: "#60758f", fontSize: 11, marginTop: 4, fontWeight: "600" },
+  optionChipMetaActive: { color: "rgba(255,255,255,0.82)" },
   helperText: { color: "#687c97", fontSize: 12, lineHeight: 18 },
   messageBubble: {
     borderRadius: 10,

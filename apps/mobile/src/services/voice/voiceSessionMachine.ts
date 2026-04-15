@@ -39,6 +39,26 @@ const DEFAULT_BACKCHANNEL_TERMS = new Set([
   "lol"
 ]);
 
+const EXPLICIT_INTERRUPT_TERMS = new Set([
+  "stop",
+  "wait",
+  "hold on",
+  "hang on",
+  "pause",
+  "actually",
+  "no wait",
+  "no stop",
+  "scratch that",
+  "change that",
+  "change it",
+  "redirect"
+]);
+
+const ASSISTANT_INTERRUPT_PREFIXES = ["freedom"];
+
+const MIN_NON_EXPLICIT_INTERRUPT_WORDS = 4;
+const MIN_NON_EXPLICIT_INTERRUPT_CHARS = 24;
+
 export function normalizeVoiceTranscript(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -99,11 +119,54 @@ export function isBackchannelUtterance(text: string, maxWords: number): boolean 
 
 export function shouldInterruptAssistant(text: string, interruptMinChars: number, maxBackchannelWords: number): boolean {
   const normalized = normalizeVoiceTranscript(text);
+  if (isExplicitInterruptCue(normalized)) {
+    return true;
+  }
+
   if (normalized.length < interruptMinChars) {
     return false;
   }
 
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length < MIN_NON_EXPLICIT_INTERRUPT_WORDS || normalized.length < MIN_NON_EXPLICIT_INTERRUPT_CHARS) {
+    return false;
+  }
+
   return !isBackchannelUtterance(normalized, maxBackchannelWords);
+}
+
+export function isLikelyAssistantEcho(transcript: string, assistantDraft: string): boolean {
+  const normalizedTranscript = normalizeSpeechComparisonText(transcript);
+  const normalizedAssistantDraft = normalizeSpeechComparisonText(assistantDraft);
+
+  if (!normalizedTranscript || !normalizedAssistantDraft) {
+    return false;
+  }
+
+  if (isExplicitInterruptCue(normalizedTranscript)) {
+    return false;
+  }
+
+  return normalizedAssistantDraft.includes(normalizedTranscript);
+}
+
+export function isExplicitInterruptCue(text: string): boolean {
+  const lowered = normalizeVoiceTranscript(text).toLowerCase();
+  if (!lowered) {
+    return false;
+  }
+
+  if (EXPLICIT_INTERRUPT_TERMS.has(lowered)) {
+    return true;
+  }
+
+  if ([...EXPLICIT_INTERRUPT_TERMS].some((term) => lowered.startsWith(`${term} `))) {
+    return true;
+  }
+
+  return ASSISTANT_INTERRUPT_PREFIXES.some((prefix) =>
+    [...EXPLICIT_INTERRUPT_TERMS].some((term) => lowered.startsWith(`${prefix} ${term}`))
+  );
 }
 
 export function humanizeVoiceSessionPhase(phase: VoiceSessionPhase): string {
@@ -188,4 +251,12 @@ function findSentenceBoundary(value: string, minimumChars: number): number {
   }
 
   return -1;
+}
+
+function normalizeSpeechComparisonText(value: string): string {
+  return sanitizeTextForSpeech(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

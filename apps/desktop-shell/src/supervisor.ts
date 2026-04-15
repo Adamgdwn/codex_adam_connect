@@ -65,14 +65,33 @@ export class DesktopShellSupervisor {
     const existing = await this.fetchOverview(1_500);
     if (existing) {
       this.latestOverview = existing;
-      this.ownsProcesses = false;
       this.emitOverview(existing);
+
+      if (this.isDesktopHostHealthy(existing)) {
+        this.ownsProcesses = false;
+        this.emitStatus({
+          state: "ready",
+          message: "Freedom is already running",
+          detail: existing.publicBaseUrl
+        });
+        return existing;
+      }
+
+      this.emitStatus({
+        state: "starting",
+        message: "Reattaching Freedom host",
+        detail: "The gateway is up, but the desktop worker is not healthy yet."
+      });
+      await this.startDesktopProcess();
+      const ready = await this.waitForHealthyOverview();
+      this.latestOverview = ready;
+      this.emitOverview(ready);
       this.emitStatus({
         state: "ready",
-        message: "Freedom is already running",
-        detail: existing.publicBaseUrl
+        message: "Freedom host is ready",
+        detail: ready.publicBaseUrl
       });
-      return existing;
+      return ready;
     }
 
     this.emitStatus({
@@ -81,7 +100,7 @@ export class DesktopShellSupervisor {
       detail: "Launching the gateway and desktop host."
     });
     await this.startManagedProcesses();
-    const ready = await this.waitForOverview();
+    const ready = await this.waitForHealthyOverview();
     this.latestOverview = ready;
     this.emitOverview(ready);
     this.emitStatus({
@@ -134,13 +153,26 @@ export class DesktopShellSupervisor {
   }
 
   private async startManagedProcesses(): Promise<void> {
-    if (this.managed.length) {
+    await this.startGatewayProcess();
+    await this.waitForHealth();
+    await this.startDesktopProcess();
+  }
+
+  private async startGatewayProcess(): Promise<void> {
+    if (this.managed.some((managed) => managed.name === "gateway")) {
       return;
     }
 
     this.ownsProcesses = true;
     this.managed.push(this.spawnManaged("gateway", ["run", "dev:gateway"]));
-    await this.waitForHealth();
+  }
+
+  private async startDesktopProcess(): Promise<void> {
+    if (this.managed.some((managed) => managed.name === "desktop")) {
+      return;
+    }
+
+    this.ownsProcesses = true;
     this.managed.push(this.spawnManaged("desktop", ["run", "dev:desktop"]));
   }
 
@@ -203,6 +235,19 @@ export class DesktopShellSupervisor {
     throw new Error(`Freedom did not become ready within ${Math.round(timeoutMs / 1000)} seconds.`);
   }
 
+  private async waitForHealthyOverview(timeoutMs = 45_000): Promise<DesktopOverviewResponse> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overview = await this.fetchOverview(2_000);
+      if (overview && this.isDesktopHostHealthy(overview)) {
+        return overview;
+      }
+      await delay(800);
+    }
+
+    throw new Error(`Freedom host did not become ready within ${Math.round(timeoutMs / 1000)} seconds.`);
+  }
+
   private async waitForHealth(timeoutMs = 20_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -230,6 +275,10 @@ export class DesktopShellSupervisor {
     } catch {
       return null;
     }
+  }
+
+  private isDesktopHostHealthy(overview: DesktopOverviewResponse): boolean {
+    return Boolean(overview.overview.hostStatus?.host.isOnline);
   }
 
   private emitStatus(status: SupervisorStatus): void {
