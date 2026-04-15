@@ -17,13 +17,13 @@ const desktopDataDir = path.join(repoRoot, "apps/desktop-extension/.local-data/d
 const sharedEnv = {
   ...process.env,
   DESKTOP_APPROVED_ROOTS: process.env.DESKTOP_APPROVED_ROOTS?.trim() || repoRoot,
-  DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Adam Connect Desktop",
+  DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Freedom Desktop",
   DESKTOP_GATEWAY_URL: process.env.DESKTOP_GATEWAY_URL?.trim() || `http://127.0.0.1:${gatewayPort}`,
   DESKTOP_DATA_DIR: process.env.DESKTOP_DATA_DIR?.trim() || desktopDataDir,
   GATEWAY_DATA_DIR: process.env.GATEWAY_DATA_DIR?.trim() || gatewayDataDir
 };
 
-process.stdout.write("Launching Adam Connect desktop...\n");
+process.stdout.write("Launching Freedom desktop...\n");
 if (!process.env.DESKTOP_APPROVED_ROOTS?.trim()) {
   process.stdout.write(`Using default approved root: ${sharedEnv.DESKTOP_APPROVED_ROOTS}\n`);
 }
@@ -128,7 +128,7 @@ async function openBrowser(url) {
 
 async function start() {
   if (shouldUseShell) {
-    process.stdout.write("Launching Adam Connect Desktop shell...\n");
+    process.stdout.write("Launching Freedom Desktop shell...\n");
     const shellProcess = spawnNpmProcess("shell", ["run", "app:desktop:shell"]);
     children.push(shellProcess);
     return;
@@ -136,11 +136,11 @@ async function start() {
 
   const alreadyRunning = await waitForDashboard(dashboardUrl, 1_500);
   if (alreadyRunning) {
-    process.stdout.write(`Adam Connect is already running at ${dashboardUrl}\n`);
+    process.stdout.write(`Freedom is already running at ${dashboardUrl}\n`);
     if (shouldOpenBrowser && !browserOpened) {
       browserOpened = await openBrowser(dashboardUrl);
       if (browserOpened) {
-        process.stdout.write("Opened the existing Adam Connect dashboard in your browser.\n");
+      process.stdout.write("Opened the existing Freedom dashboard in your browser.\n");
       } else {
         process.stdout.write(`Open this URL in your browser: ${dashboardUrl}\n`);
       }
@@ -163,7 +163,7 @@ async function start() {
   if (shouldOpenBrowser && !browserOpened) {
     browserOpened = await openBrowser(dashboardUrl);
     if (browserOpened) {
-      process.stdout.write("Opened Adam Connect in your browser.\n");
+      process.stdout.write("Opened Freedom in your browser.\n");
     } else {
       process.stdout.write(`Open this URL in your browser: ${dashboardUrl}\n`);
     }

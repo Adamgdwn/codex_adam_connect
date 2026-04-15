@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcess } from "node:child_process";
+import type { Writable } from "node:stream";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { DesktopOverviewResponse } from "@adam-connect/shared";
@@ -57,7 +58,7 @@ export class DesktopShellSupervisor {
   async start(): Promise<DesktopOverviewResponse> {
     this.emitStatus({
       state: "starting",
-      message: "Starting Adam Connect",
+      message: "Starting Freedom",
       detail: "Checking whether the local dashboard is already running."
     });
 
@@ -68,7 +69,7 @@ export class DesktopShellSupervisor {
       this.emitOverview(existing);
       this.emitStatus({
         state: "ready",
-        message: "Adam Connect is already running",
+        message: "Freedom is already running",
         detail: existing.publicBaseUrl
       });
       return existing;
@@ -109,7 +110,7 @@ export class DesktopShellSupervisor {
     this.restarting = true;
     this.emitStatus({
       state: "restarting",
-      message: "Restarting Adam Connect",
+      message: "Restarting Freedom",
       detail: "Refreshing the gateway and desktop host."
     });
 
@@ -150,7 +151,7 @@ export class DesktopShellSupervisor {
       env: {
         ...process.env,
         DESKTOP_APPROVED_ROOTS: process.env.DESKTOP_APPROVED_ROOTS?.trim() || this.repoRoot,
-        DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Adam Connect Desktop",
+        DESKTOP_HOST_NAME: process.env.DESKTOP_HOST_NAME?.trim() || "Freedom Desktop",
         DESKTOP_GATEWAY_URL: this.localBaseUrl,
         DESKTOP_DATA_DIR: this.desktopDataDir,
         GATEWAY_DATA_DIR: this.gatewayDataDir
@@ -160,12 +161,19 @@ export class DesktopShellSupervisor {
 
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      process.stdout.write(`[shell:${name}] ${chunk}`);
+      safeWrite(process.stdout, `[shell:${name}] ${chunk}`);
     });
 
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      process.stderr.write(`[shell:${name}] ${chunk}`);
+      safeWrite(process.stderr, `[shell:${name}] ${chunk}`);
+    });
+
+    child.stdout?.on("error", () => {
+      // Ignore child log pipe failures so the Electron shell stays alive.
+    });
+    child.stderr?.on("error", () => {
+      // Ignore child log pipe failures so the Electron shell stays alive.
     });
 
     child.on("exit", (code, signal) => {
@@ -192,7 +200,7 @@ export class DesktopShellSupervisor {
       await delay(800);
     }
 
-    throw new Error(`Adam Connect did not become ready within ${Math.round(timeoutMs / 1000)} seconds.`);
+    throw new Error(`Freedom did not become ready within ${Math.round(timeoutMs / 1000)} seconds.`);
   }
 
   private async waitForHealth(timeoutMs = 20_000): Promise<void> {
@@ -209,7 +217,7 @@ export class DesktopShellSupervisor {
       await delay(400);
     }
 
-    throw new Error(`Adam Connect gateway did not become healthy within ${Math.round(timeoutMs / 1000)} seconds.`);
+    throw new Error(`Freedom gateway did not become healthy within ${Math.round(timeoutMs / 1000)} seconds.`);
   }
 
   private async fetchOverview(timeoutMs: number): Promise<DesktopOverviewResponse | null> {
@@ -231,4 +239,24 @@ export class DesktopShellSupervisor {
   private emitOverview(overview: DesktopOverviewResponse): void {
     this.events.emit("overview", overview);
   }
+}
+
+function safeWrite(stream: Writable, chunk: string): void {
+  const candidate = stream as Writable & { destroyed?: boolean; writable?: boolean };
+  if (candidate.destroyed || candidate.writable === false) {
+    return;
+  }
+
+  try {
+    stream.write(chunk);
+  } catch (error) {
+    if (isBrokenPipe(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function isBrokenPipe(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EPIPE";
 }

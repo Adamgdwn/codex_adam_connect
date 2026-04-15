@@ -1,11 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Linking, Platform, Pressable, RefreshControl, ScrollView, Switch, Text, TextInput, View } from "react-native";
-import { PROJECT_TEMPLATES, humanizeResponseStyle } from "@adam-connect/shared";
+import {
+  FREEDOM_PRIMARY_SESSION_TITLE,
+  FREEDOM_PRODUCT_NAME,
+  FREEDOM_RUNTIME_NAME,
+  PROJECT_TEMPLATES,
+  humanizeResponseStyle
+} from "@adam-connect/shared";
 import type { AppState } from "../store/appStore";
 import type { TtsVoiceOption } from "../services/voice/ttsService";
 import { isValidExternalEmail } from "../utils/externalSend";
 import { findManualStopTargetSession, findSendTargetSession, findStopTargetSession, formatMessageTimestamp, isOperatorSession, isSessionBusy } from "../utils/operatorConsole";
-import { Banner, LabeledInput, MessageBubble, StatusChip, VoiceSessionPanel, WorkingBubble } from "./components";
+import { Banner, LabeledInput, MessageBubble, RoboticOwlBadge, StatusChip, VoiceSessionPanel, WorkingBubble } from "./components";
 import { styles } from "./mobileStyles";
 
 const keyboardDismissMode: "interactive" | "on-drag" = Platform.OS === "ios" ? "interactive" : "on-drag";
@@ -29,10 +35,10 @@ export function PairingScreen(props: {
       {...refreshScrollInteractionProps}
     >
       <View style={styles.heroCard}>
-        <Text style={styles.eyebrow}>Pair Over Tailscale</Text>
-        <Text style={styles.heroTitle}>Adam Connect</Text>
+        <Text style={styles.eyebrow}>Freedom Companion</Text>
+        <Text style={styles.heroTitle}>{FREEDOM_PRODUCT_NAME}</Text>
         <Text style={styles.heroBody}>
-          Turn this phone into a private Codex console for your desktop. Pair once, keep API keys off the device,
+          Turn this phone into a private Freedom companion for your desktop. Pair once, keep API keys off the device,
           and use voice or text from anywhere on your tailnet.
         </Text>
       </View>
@@ -57,14 +63,14 @@ export function PairingScreen(props: {
             store.connectPairing().catch((error) => console.warn(error));
           }}
         >
-          <Text style={styles.primaryLabel}>Pair Phone</Text>
+          <Text style={styles.primaryLabel}>Link Phone</Text>
         </Pressable>
       </View>
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Need Tailscale?</Text>
         <Text style={styles.supportingText}>
-          Adam Connect can help you get started, but it cannot silently enroll devices into your tailnet.
+          {FREEDOM_RUNTIME_NAME} can help you get started, but it cannot silently enroll devices into your tailnet.
         </Text>
         <Text style={styles.metric}>1. Install Tailscale on this phone and on your desktop.</Text>
         <Text style={styles.metric}>2. Sign both devices into the same Tailscale account.</Text>
@@ -111,11 +117,23 @@ export function HostScreen(props: {
       refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={onRefresh} tintColor="#0f766e" progressViewOffset={12} />}
       {...refreshScrollInteractionProps}
     >
+      <View style={styles.assistantStageCard}>
+        <RoboticOwlBadge compact />
+        <View style={styles.stageHeaderRow}>
+          <Text style={styles.stageEyebrow}>OWL-01</Text>
+          <Text style={styles.stageBadge}>Companion Link</Text>
+        </View>
+        <Text style={styles.stageTitle}>Freedom companion, tuned for quick oversight.</Text>
+        <Text style={styles.stageBody}>
+          This phone should stay useful at a glance: connection health, voice readiness, trusted devices, and wake controls without crowding the screen.
+        </Text>
+      </View>
+
       {store.notice ? <Banner text={store.notice} tone="info" /> : null}
       {store.error ? <Banner text={store.error} tone="error" /> : null}
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Host Status</Text>
+        <Text style={styles.sectionTitle}>Mission Control</Text>
         <View style={styles.statusRow}>
           <StatusChip label={store.hostStatus?.host.isOnline ? "Desktop online" : "Desktop offline"} tone={store.hostStatus?.host.isOnline ? "teal" : "orange"} />
           <StatusChip
@@ -137,7 +155,7 @@ export function HostScreen(props: {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Tailscale</Text>
+        <Text style={styles.sectionTitle}>Connect</Text>
         <Text style={styles.metric}>
           Installed: {store.hostStatus?.tailscale.installed ? "yes" : "no"} | Connected: {store.hostStatus?.tailscale.connected ? "yes" : "no"}
         </Text>
@@ -170,7 +188,7 @@ export function HostScreen(props: {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Approved Roots</Text>
+        <Text style={styles.sectionTitle}>Approved Workspace Context</Text>
         {(store.hostStatus?.host.approvedRoots ?? []).map((rootPath) => (
           <Text key={rootPath} style={styles.rootPath}>
             {rootPath}
@@ -179,7 +197,7 @@ export function HostScreen(props: {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Voice</Text>
+        <Text style={styles.sectionTitle}>Voice & Reply Loop</Text>
         <View style={styles.rowBetween}>
           <Text style={styles.metric}>Voice available</Text>
           <Text style={styles.metric}>{store.voiceAvailable ? "yes" : "no"}</Text>
@@ -250,7 +268,7 @@ export function HostScreen(props: {
         <Text style={styles.supportingText}>
           {wakeConfigured
             ? hostOnline
-              ? `${store.wakeControl?.targetLabel ?? "Homebase"} is online. Use wake-on-request when the desktop is asleep and you want Adam Connect back without running the full workstation constantly.`
+              ? `${store.wakeControl?.targetLabel ?? "Homebase"} is online. Use wake-on-request when the desktop is asleep and you want ${FREEDOM_PRODUCT_NAME} back without running the full workstation constantly.`
               : `Wake relay is configured for ${store.wakeControl?.targetLabel ?? "Homebase"}. Tap this when the desktop is asleep and you want the operator console back.`
             : "Wake-on-request is not configured on this desktop yet."}
         </Text>
@@ -273,10 +291,10 @@ export function HostScreen(props: {
         <Text style={styles.sectionTitle}>External Reports</Text>
         <Text style={styles.supportingText}>
           {outboundEmail?.enabled
-            ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Email this reply on a completed Codex message, or ask naturally by voice and confirm before send.`
+            ? `Email delivery is ready from ${outboundEmail.fromAddress}. In chat, use Email this reply on a completed ${FREEDOM_PRODUCT_NAME} message, or ask naturally by voice and confirm before send.`
             : store.hostStatus
-              ? "External email is not ready in the running desktop process yet. If you just added the Resend env vars, restart Adam Connect on the desktop and refresh this screen."
-              : "External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside Adam Connect."}
+              ? `External email is not ready in the running desktop process yet. If you just added the Resend env vars, restart ${FREEDOM_RUNTIME_NAME} on the desktop and refresh this screen.`
+              : `External email is not configured yet. Add the Resend env vars on the desktop gateway before sending outside ${FREEDOM_PRODUCT_NAME}.`}
         </Text>
         <Text style={styles.metric}>
           Provider: {outboundEmail?.provider ?? "none"} | Trusted recipients: {store.outboundRecipients.length}
@@ -434,22 +452,34 @@ export function SessionsScreen(props: {
       refreshControl={<RefreshControl refreshing={store.refreshing} onRefresh={onRefresh} tintColor="#0f766e" progressViewOffset={12} />}
       {...refreshScrollInteractionProps}
     >
+      <View style={styles.assistantStageCard}>
+        <RoboticOwlBadge compact />
+        <View style={styles.stageHeaderRow}>
+          <Text style={styles.stageEyebrow}>OWL-01</Text>
+          <Text style={styles.stageBadge}>Build Surface</Text>
+        </View>
+        <Text style={styles.stageTitle}>Launch structured work from the phone.</Text>
+        <Text style={styles.stageBody}>
+          Start a build chat, capture the outcome you want, and keep active projects moving while the desktop handles the deeper execution surface.
+        </Text>
+      </View>
+
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Project Wizard</Text>
-        <Text style={styles.supportingText}>Kick off a persistent project chat with the goal, output, and reply style already set.</Text>
-        <Text style={styles.supportingText}>Adam Connect still keeps the default `Operator` chat ready for quick voice turns.</Text>
+        <Text style={styles.sectionTitle}>Build Studio</Text>
+        <Text style={styles.supportingText}>Launch a new build or project chat with the goal, output, and response style already set.</Text>
+        <Text style={styles.supportingText}>{FREEDOM_RUNTIME_NAME} keeps the default `{FREEDOM_PRIMARY_SESSION_TITLE}` chat ready for fast voice turns, while this tab handles deeper build work.</Text>
         <LabeledInput
-          label="Find Existing Chats"
+          label="Find Existing Projects"
           value={searchQuery}
           onChange={setSearchQuery}
           autoCapitalize="none"
         />
         <LabeledInput
-          label="Project Name"
+          label="Build Name"
           value={store.newSessionTitle}
           onChange={(value) => store.setField("newSessionTitle", value)}
           autoCapitalize="sentences"
-          placeholder="Website refresh, Android build cleanup, docs sprint..."
+          placeholder="New agent build, Android cleanup, desktop shell polish..."
         />
         <LabeledInput
           label="Workspace Root"
@@ -457,22 +487,22 @@ export function SessionsScreen(props: {
           onChange={(value) => store.setField("newSessionRootPath", value)}
         />
         <LabeledInput
-          label="Project Goal"
+          label="Build Goal"
           value={store.projectIntent}
           onChange={(value) => store.setField("projectIntent", value)}
           autoCapitalize="sentences"
           multiline
-          placeholder="What are we trying to build, fix, research, or ship from this workspace?"
+          placeholder="What should Freedom build, improve, fix, research, or ship from this workspace?"
         />
         <LabeledInput
-          label="Desired Output"
+          label="Desired Deliverable"
           value={store.projectOutputType}
           onChange={(value) => store.setField("projectOutputType", value)}
           autoCapitalize="sentences"
           placeholder="implementation plan, bugfix patch, spec, refactor, release checklist..."
         />
         <LabeledInput
-          label="Extra Instructions"
+          label="Constraints & Context"
           value={store.projectInstructions}
           onChange={(value) => store.setField("projectInstructions", value)}
           autoCapitalize="sentences"
@@ -516,15 +546,20 @@ export function SessionsScreen(props: {
           <Text style={styles.helperText}>New project kickoff turns will use a {humanizeResponseStyle(store.responseStyle)} reply style.</Text>
         </View>
         <Pressable style={styles.primaryButton} onPress={() => store.createProjectSession().catch((error) => console.warn(error))}>
-          <Text style={styles.primaryLabel}>Start Project Chat</Text>
+          <Text style={styles.primaryLabel}>Launch Build Chat</Text>
         </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Active Projects</Text>
+        <Text style={styles.supportingText}>These are the current Freedom work threads you can reopen, rename, or clean up from the phone.</Text>
       </View>
 
       {visibleSessions.length ? (
         visibleSessions.map((item) => (
           <View key={item.id} style={[styles.card, styles.sessionCard]}>
             <View style={styles.statusRow}>
-              {isOperatorSession(item) ? <Text style={styles.operatorBadge}>Default Operator</Text> : null}
+              {isOperatorSession(item) ? <Text style={styles.operatorBadge}>Default {FREEDOM_PRODUCT_NAME}</Text> : null}
               {!isOperatorSession(item) ? <Text style={styles.kindBadge}>{humanizeSessionKind(item.kind)}</Text> : null}
               {item.pinned ? <Text style={styles.pinnedBadge}>Pinned</Text> : null}
             </View>
@@ -558,7 +593,7 @@ export function SessionsScreen(props: {
             </View>
           </View>
         ))
-      ) : searchQuery.trim() ? <Text style={styles.metric}>No chats match that search yet.</Text> : <Text style={styles.metric}>No chats yet. Start one from an approved root.</Text>}
+      ) : searchQuery.trim() ? <Text style={styles.metric}>No active projects match that search yet.</Text> : <Text style={styles.metric}>No active projects yet. Launch one from an approved root.</Text>}
     </ScrollView>
   );
 }
@@ -651,12 +686,35 @@ export function ChatScreen(props: {
         }}
         scrollEventThrottle={16}
       >
+        <View style={styles.assistantStageCard}>
+          <RoboticOwlBadge compact />
+          <View style={styles.stageHeaderRow}>
+            <Text style={styles.stageEyebrow}>OWL-01</Text>
+            <Text style={styles.stageBadge}>Talk Surface</Text>
+          </View>
+          <Text style={styles.stageTitle}>Talk to Freedom like an active partner.</Text>
+          <Text style={styles.stageBody}>
+            Voice and text stay available here all the time. Ask for the next move, interrupt when needed, or jump straight into a build thread.
+          </Text>
+          <View style={styles.stageActionRow}>
+            <Pressable
+              style={styles.primaryButton}
+              onPress={() => store.toggleListening().catch((error) => console.warn(error))}
+            >
+              <Text style={styles.primaryLabel}>{store.voiceSessionActive ? "Stop Voice" : "Start Voice"}</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={() => store.setView("sessions")}>
+              <Text style={styles.secondaryLabel}>Open Build</Text>
+            </Pressable>
+          </View>
+        </View>
+
         {showChatChrome ? (
           <View style={[styles.card, styles.chatChromeCard]}>
             <View style={styles.chatSummaryHeader}>
               <View style={styles.chatSummaryCopy}>
                 <View style={styles.chatSummaryBadgeRow}>
-                  {selectedSession && isOperatorSession(selectedSession) ? <Text style={styles.operatorBadge}>Operator</Text> : null}
+                  {selectedSession && isOperatorSession(selectedSession) ? <Text style={styles.operatorBadge}>{FREEDOM_PRODUCT_NAME}</Text> : null}
                   {!selectedSession || isOperatorSession(selectedSession) ? null : <Text style={styles.kindBadge}>{humanizeSessionKind(selectedSession.kind)}</Text>}
                   <Text style={styles.styleBadge}>{responseStyles.find((style) => style.id === store.responseStyle)?.label ?? "Natural"}</Text>
                 </View>
@@ -667,7 +725,7 @@ export function ChatScreen(props: {
                       ? "Send will resume your latest chat."
                       : canCreateFromApprovedRoot
                         ? "Send will create the first chat from the default root."
-                        : "Choose a chat from the Chats tab first.")}
+                        : "Open or launch a chat first.")}
                 </Text>
                 {selectedSession?.lastError ? <Text style={styles.helperText}>{selectedSession.lastError}</Text> : null}
               </View>
@@ -713,8 +771,8 @@ export function ChatScreen(props: {
             <WorkingBubble
               label={
                 store.sendingMessage
-                  ? "Adam Connect is sending your turn to the desktop."
-                  : "Adam Connect is still working on this turn. You can wait, interrupt, or say a new turn."
+                  ? `${FREEDOM_RUNTIME_NAME} is sending your turn to the desktop.`
+                  : `${FREEDOM_RUNTIME_NAME} is still working on this turn. You can wait, interrupt, or say a new turn.`
               }
             />
           ) : null}
@@ -736,9 +794,9 @@ export function ChatScreen(props: {
             <Text style={styles.supportingText}>
               {selectedExternalMessage
                 ? store.externalDraft.confirmationRequired
-                  ? "Adam Connect prepared this email draft from your conversation and is waiting for a final confirmation before it sends."
-                  : `You are sending a completed Codex reply from this chat to an email recipient.`
-                : "Select a completed Codex reply before sending it externally."}
+                  ? `${FREEDOM_RUNTIME_NAME} prepared this email draft from your conversation and is waiting for a final confirmation before it sends.`
+                  : `You are sending a completed ${FREEDOM_PRODUCT_NAME} reply from this chat to an email recipient.`
+                : `Select a completed ${FREEDOM_PRODUCT_NAME} reply before sending it externally.`}
             </Text>
             {selectedExternalMessage ? (
               <Text style={styles.helperText} numberOfLines={3}>
@@ -761,11 +819,11 @@ export function ChatScreen(props: {
               ))}
             </View>
             {!store.outboundRecipients.length ? (
-              <Text style={styles.helperText}>Add at least one trusted recipient on the Host tab first.</Text>
+              <Text style={styles.helperText}>Add at least one trusted recipient from Overview first.</Text>
             ) : null}
             {store.externalDraft.confirmationRequired ? (
               <Text style={styles.helperText}>
-                You can confirm by voice with “yes, send it” or cancel with “cancel”. Open ⚙ if you want to edit the draft manually.
+                You can confirm by voice with “yes, send it” or cancel with “cancel”. The edit fields stay open below if you want to adjust the draft manually.
               </Text>
             ) : null}
             {!expandExternalDraft ? (
@@ -794,7 +852,7 @@ export function ChatScreen(props: {
                   onChange={(value) => store.updateExternalDraft("intro", value)}
                   autoCapitalize="sentences"
                   multiline
-                  placeholder="Optional note before the Codex output..."
+                  placeholder={`Optional note before the ${FREEDOM_PRODUCT_NAME} output...`}
                 />
               </>
             )}
@@ -817,7 +875,7 @@ export function ChatScreen(props: {
             <TextInput
               value={store.composer}
               onChangeText={(value) => store.setField("composer", value)}
-              placeholder="Ask Codex something about this repo..."
+              placeholder={`Ask ${FREEDOM_PRODUCT_NAME} something about this repo...`}
               placeholderTextColor="#64748b"
               multiline
               style={[styles.composer, Platform.OS === "android" ? styles.composerCompact : null]}
@@ -858,7 +916,7 @@ export function ChatScreen(props: {
       ) : (
         <View style={[styles.card, styles.voiceFirstFooterCard, { marginBottom: composerBottomPadding + keyboardInset }]}>
           <Text style={styles.metric}>Voice-first mode is on.</Text>
-          <Text style={styles.helperText}>Open ⚙ to reach manual text and email tools.</Text>
+          <Text style={styles.helperText}>Manual text and email tools stay available below whenever you need them.</Text>
           {canRequestStop ? (
             <Pressable
               testID="chat-stop-button"
@@ -877,18 +935,18 @@ export function ChatScreen(props: {
 
 function humanizeCodexState(status: "logged_in" | "logged_out" | "error"): string {
   if (status === "logged_in") {
-    return "Codex ready";
+    return "Freedom ready";
   }
   if (status === "error") {
-    return "Codex needs attention";
+    return "Freedom needs attention";
   }
-  return "Codex login required";
+  return "Freedom login required";
 }
 
 function humanizeAvailability(value: "ready" | "offline" | "reconnecting" | "repair_needed" | "codex_unavailable" | "tailscale_unavailable" | "needs_attention"): string {
   switch (value) {
     case "codex_unavailable":
-      return "Codex unavailable";
+      return "Freedom unavailable";
     case "offline":
       return "Desktop offline";
     case "ready":
@@ -912,7 +970,7 @@ const notificationEvents: Array<{
   {
     id: "run_complete",
     label: "Run complete",
-    description: "Send an Android update when Codex finishes a run."
+    description: "Send an Android update when Freedom finishes a run."
   },
   {
     id: "run_failed",
@@ -950,7 +1008,7 @@ function humanizeSessionKind(kind: "operator" | "project" | "admin" | "build" | 
     case "notes":
       return "Notes";
     case "operator":
-      return "Operator";
+      return FREEDOM_PRODUCT_NAME;
     default:
       return "Project";
   }

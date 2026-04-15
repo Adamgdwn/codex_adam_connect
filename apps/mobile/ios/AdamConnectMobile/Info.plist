@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>AdamConnectMobile</string>
+	<string>Freedom</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -37,9 +37,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Adam Connect uses the microphone so you can dictate messages to Codex.</string>
+	<string>Freedom uses the microphone so you can dictate messages to your desktop companion.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Adam Connect converts your speech into text before sending it to your desktop host.</string>
+	<string>Freedom converts your speech into text before sending it to your desktop host.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

@@ -96,7 +96,7 @@ export function renderOutboundEmail(params: {
   const intro = params.intro.trim();
   const content = params.messageContent.trim();
   const introSection = intro ? `${intro}\n\n` : "";
-  const text = `${introSection}${content}\n\nSent from ${params.hostName} via Adam Connect.\nChat: ${params.sessionTitle}\nSubject: ${params.subject}`.trim();
+  const text = `${introSection}${content}\n\nSent from ${params.hostName} via Freedom Connect.\nChat: ${params.sessionTitle}\nSubject: ${params.subject}`.trim();
 
   return {
     text,
@@ -108,7 +108,7 @@ export function renderOutboundEmail(params: {
       intro ? `<p style="font-size:15px;line-height:1.6;color:#334155;margin:0 0 18px;">${escapeHtml(intro)}</p>` : "",
       renderMessageHtml(content),
       `<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0 16px;" />`,
-      `<p style="margin:0;color:#64748b;font-size:12px;line-height:1.6;">Sent from ${escapeHtml(params.hostName)} via Adam Connect.<br />Chat: ${escapeHtml(params.sessionTitle)}</p>`,
+      `<p style="margin:0;color:#64748b;font-size:12px;line-height:1.6;">Sent from ${escapeHtml(params.hostName)} via Freedom Connect.<br />Chat: ${escapeHtml(params.sessionTitle)}</p>`,
       "</div></body></html>"
     ].join("")
   };

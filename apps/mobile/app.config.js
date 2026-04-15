@@ -1,7 +1,7 @@
 module.exports = {
   expo: {
-    name: "AdamConnectMobile",
-    slug: "adam-connect-mobile",
+    name: "Freedom",
+    slug: "freedom-mobile-companion",
     plugins: [
       [
         "expo-speech-recognition",

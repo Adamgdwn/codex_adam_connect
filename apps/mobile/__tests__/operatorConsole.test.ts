@@ -1,4 +1,4 @@
-import { buildProjectStarterPrompt, buildTurnPrompt } from "@adam-connect/shared";
+import { FREEDOM_PRIMARY_SESSION_TITLE, buildProjectStarterPrompt, buildTurnPrompt } from "@adam-connect/shared";
 import type { ChatSession } from "@adam-connect/shared";
 import {
   findManualStopTargetSession,
@@ -14,19 +14,19 @@ import {
 } from "../src/utils/operatorConsole";
 
 describe("operatorConsole helpers", () => {
-  test("sortSessionsForDisplay pins Operator first", () => {
+  test("sortSessionsForDisplay pins Freedom first", () => {
     const sessions = [
       makeSession({ id: "2", title: "Project", updatedAt: "2026-04-12T12:00:00.000Z" }),
-      makeSession({ id: "1", title: "Operator", updatedAt: "2026-04-12T11:00:00.000Z" })
+      makeSession({ id: "1", title: FREEDOM_PRIMARY_SESSION_TITLE, kind: "operator", updatedAt: "2026-04-12T11:00:00.000Z" })
     ];
 
-    expect(sortSessionsForDisplay(sessions).map((session) => session.title)).toEqual(["Operator", "Project"]);
+    expect(sortSessionsForDisplay(sessions).map((session) => session.title)).toEqual([FREEDOM_PRIMARY_SESSION_TITLE, "Project"]);
   });
 
-  test("findSendTargetSession prefers the selected chat and falls back to Operator", () => {
+  test("findSendTargetSession prefers the selected chat and falls back to Freedom", () => {
     const sessions = [
       makeSession({ id: "2", title: "Project", updatedAt: "2026-04-12T12:00:00.000Z" }),
-      makeSession({ id: "1", title: "Operator", updatedAt: "2026-04-12T11:00:00.000Z" })
+      makeSession({ id: "1", title: FREEDOM_PRIMARY_SESSION_TITLE, kind: "operator", updatedAt: "2026-04-12T11:00:00.000Z" })
     ];
 
     expect(findSendTargetSession("2", sessions)?.id).toBe("2");
@@ -35,7 +35,7 @@ describe("operatorConsole helpers", () => {
 
   test("findStopTargetSession falls back to the actually busy chat", () => {
     const sessions = [
-      makeSession({ id: "1", title: "Operator", status: "running", updatedAt: "2026-04-12T11:00:00.000Z" }),
+      makeSession({ id: "1", title: FREEDOM_PRIMARY_SESSION_TITLE, kind: "operator", status: "running", updatedAt: "2026-04-12T11:00:00.000Z" }),
       makeSession({ id: "2", title: "Notes", status: "idle", updatedAt: "2026-04-12T12:00:00.000Z" })
     ];
 
@@ -45,7 +45,7 @@ describe("operatorConsole helpers", () => {
 
   test("findManualStopTargetSession falls back to the selected or latest chat for recovery", () => {
     const sessions = [
-      makeSession({ id: "1", title: "Operator", status: "idle", updatedAt: "2026-04-12T11:00:00.000Z" }),
+      makeSession({ id: "1", title: FREEDOM_PRIMARY_SESSION_TITLE, kind: "operator", status: "idle", updatedAt: "2026-04-12T11:00:00.000Z" }),
       makeSession({ id: "2", title: "Notes", status: "idle", updatedAt: "2026-04-12T12:00:00.000Z" })
     ];
 
@@ -101,7 +101,7 @@ describe("operatorConsole helpers", () => {
 
   test("buildTurnPrompt carries response style and voice context", () => {
     const prompt = buildTurnPrompt({
-      sessionTitle: "Operator",
+      sessionTitle: FREEDOM_PRIMARY_SESSION_TITLE,
       sessionKind: "operator",
       userText: "check the repo status",
       responseStyle: "concise",
@@ -132,6 +132,14 @@ function makeSession(overrides: Partial<ChatSession>): ChatSession {
     pinned: false,
     archived: false,
     rootPath: "/tmp",
+    identity: {
+      productName: "Freedom",
+      assistantName: "Freedom",
+      freedomSessionId: "freedom-session",
+      originSurface: "mobile_companion",
+      workspaceContext: "/tmp",
+      auditCorrelationId: "audit-correlation"
+    },
     threadId: null,
     status: "idle",
     activeTurnId: null,

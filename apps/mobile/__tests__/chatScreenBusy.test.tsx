@@ -1,5 +1,6 @@
 import React from "react";
 import ReactTestRenderer from "react-test-renderer";
+import { FREEDOM_PRIMARY_SESSION_TITLE } from "@adam-connect/shared";
 import { ChatScreen } from "../src/app/screens";
 import type { AppState } from "../src/store/appStore";
 
@@ -27,7 +28,7 @@ const baseStore = {
     },
     auth: {
       status: "logged_in",
-      detail: "Codex ready"
+      detail: "Freedom ready"
     },
     tailscale: {
       installed: true,
@@ -66,11 +67,19 @@ const baseStore = {
       id: "session-1",
       hostId: "host-1",
       deviceId: "device-1",
-      title: "Operator",
+      title: FREEDOM_PRIMARY_SESSION_TITLE,
       kind: "operator",
       pinned: false,
       archived: false,
       rootPath: "/tmp/workspace",
+      identity: {
+        productName: "Freedom",
+        assistantName: "Freedom",
+        freedomSessionId: "freedom-session-1",
+        originSurface: "mobile_companion",
+        workspaceContext: "/tmp/workspace",
+        auditCorrelationId: "audit-correlation-1"
+      },
       threadId: null,
       status: "running",
       activeTurnId: "turn-1",
@@ -184,7 +193,7 @@ describe("ChatScreen busy send state", () => {
         {
           ...baseStore.sessions[0],
           id: "session-1",
-          title: "Operator",
+          title: FREEDOM_PRIMARY_SESSION_TITLE,
           status: "running"
         },
         {
@@ -217,7 +226,7 @@ describe("ChatScreen busy send state", () => {
         {
           ...baseStore.sessions[0],
           id: "session-1",
-          title: "Operator",
+          title: FREEDOM_PRIMARY_SESSION_TITLE,
           status: "idle",
           activeTurnId: null
         }

@@ -14,11 +14,13 @@ let isQuitting = false;
 let lostConnectionAttempts = 0;
 let lastPairingCode: string | null = null;
 
+app.disableHardwareAcceleration();
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.setName("Adam Connect Desktop");
+  app.setName("Freedom Desktop");
 
   app.on("second-instance", () => {
     void revealOperatorConsole({ focus: true, forceDashboard: true });
@@ -63,7 +65,7 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: "#fdf8ef",
-    title: "Adam Connect Desktop",
+    title: "Freedom Desktop",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       contextIsolation: true,
@@ -102,12 +104,12 @@ function createWindow(): void {
   });
   mainWindow.webContents.setZoomFactor(0.92);
 
-  loadInterstitial("Launching Adam Connect", "Preparing the native desktop shell and local services.");
+  loadInterstitial("Launching Freedom", "Preparing the native desktop shell and local services.");
 }
 
 function createTray(): void {
   tray = new Tray(createAppIcon());
-  tray.setToolTip("Adam Connect Desktop");
+  tray.setToolTip("Freedom Desktop");
   tray.on("click", () => {
     void revealOperatorConsole({ focus: true, forceDashboard: false });
   });
@@ -118,7 +120,7 @@ function attachSupervisorEvents(): void {
   supervisor.on("status", (status) => {
     if (status.state !== "ready") {
       const detail = status.detail ? `\n${sanitizeShellDetail(status.detail)}` : "";
-      loadInterstitial(status.message, "Keeping the native operator console and local Codex bridge healthy.", detail.trim());
+      loadInterstitial(status.message, "Keeping the native Freedom console and runtime bridge healthy.", detail.trim());
     }
     const tooltip = `${status.message}${status.detail ? ` • ${status.detail}` : ""}`;
     tray?.setToolTip(tooltip);
@@ -148,8 +150,8 @@ async function boot(): Promise<void> {
     startHealthLoop();
   } catch (error) {
     const message = sanitizeShellDetail(error instanceof Error ? error.message : "Unknown startup failure");
-    loadInterstitial("Adam Connect needs attention", "The native shell could not finish starting.", message);
-    notify("Adam Connect failed to start", message);
+    loadInterstitial("Freedom needs attention", "The native shell could not finish starting.", message);
+    notify("Freedom failed to start", message);
   }
 }
 
@@ -180,7 +182,7 @@ function startHealthLoop(): void {
       }
 
       loadInterstitial(
-        "Reconnecting Adam Connect",
+        "Reconnecting Freedom",
         "The shell lost contact with the local services, so it is trying a safe restart.",
         dashboardFallbackUrl
       );
@@ -198,13 +200,13 @@ function startHealthLoop(): void {
         restartFailures += 1;
         const message = sanitizeShellDetail(error instanceof Error ? error.message : "Restart failed");
         loadInterstitial(
-          "Adam Connect needs attention",
+          "Freedom needs attention",
           restartFailures >= 3
             ? "Automatic restart paused after repeated failures. Use the menu to restart when you are ready."
             : "The shell could not restart cleanly yet. It will keep trying while the app remains open.",
           message
         );
-        notify("Adam Connect restart failed", message);
+        notify("Freedom restart failed", message);
       }
     })();
   }, 5000);
@@ -239,7 +241,7 @@ function updateWindowTitle(): void {
   }
   const pairingCode = latestOverview?.overview.hostStatus?.host.pairingCode;
   const suffix = pairingCode ? ` • ${pairingCode}` : "";
-  mainWindow.setTitle(`Adam Connect Desktop${suffix}`);
+  mainWindow.setTitle(`Freedom Desktop${suffix}`);
 }
 
 async function revealOperatorConsole(options?: { focus?: boolean; forceDashboard?: boolean }): Promise<void> {
@@ -277,10 +279,10 @@ function updateApplicationMenu(): void {
 
   const template = [
     {
-      label: "Adam Connect",
+      label: "Freedom",
       submenu: [
         {
-          label: "Show Operator Console",
+          label: "Show Freedom Console",
           click: async () => {
             await revealOperatorConsole({ focus: true, forceDashboard: true });
           }
@@ -308,7 +310,7 @@ function updateApplicationMenu(): void {
         {
           label: "Restart Services",
           click: async () => {
-            loadInterstitial("Restarting Adam Connect", "Refreshing the native shell and local services.");
+            loadInterstitial("Restarting Freedom", "Refreshing the native shell and local services.");
             const overview = await supervisor.restart();
             latestOverview = overview;
             await loadDashboard(overview.dashboardUrl);
@@ -333,7 +335,7 @@ function updateApplicationMenu(): void {
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
   tray?.setContextMenu(menu);
-  tray?.setToolTip(`Adam Connect Operator Console • Pairing ${pairingCode}`);
+  tray?.setToolTip(`Freedom Console • Pairing ${pairingCode}`);
 }
 
 function notify(title: string, body: string): void {
@@ -384,10 +386,10 @@ function stripUrlForComparison(value: string): string {
 function sanitizeShellDetail(detail: string): string {
   const compact = detail.replace(/\s+/g, " ").trim();
   if (compact.includes("loading 'data:text/html")) {
-    return "The shell swapped between startup views before one screen finished loading. Try opening Adam Connect again.";
+    return "The shell swapped between startup views before one screen finished loading. Try opening Freedom again.";
   }
   if (compact.includes("Object has been destroyed")) {
-    return "The previous Adam Connect window closed during startup. Open the launcher again to reconnect.";
+    return "The previous Freedom window closed during startup. Open the launcher again to reconnect.";
   }
   return compact;
 }

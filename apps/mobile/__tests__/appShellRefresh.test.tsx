@@ -27,7 +27,7 @@ const mockStore = {
     },
     auth: {
       status: "logged_in",
-      detail: "Codex ready"
+      detail: "Freedom ready"
     },
     tailscale: {
       installed: true,
@@ -162,7 +162,7 @@ describe("refresh affordances", () => {
     mockStore.setField.mockClear();
   });
 
-  test("AppShell tucks the shared controls behind a header toggle while staying in chat", async () => {
+  test("AppShell keeps the core navigation and actions visible while staying in chat", async () => {
     let tree: ReactTestRenderer.ReactTestRenderer;
 
     await ReactTestRenderer.act(async () => {
@@ -171,22 +171,15 @@ describe("refresh affordances", () => {
 
     let labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
 
-    expect(labels).not.toContain("Refresh");
+    expect(labels).toContain("Overview");
+    expect(labels).toContain("Build");
+    expect(labels).toContain("Talk");
     expect(labels).toContain("Voice");
-    expect(labels).toContain("⚙");
-    expect(labels.some((label) => label.includes("Codex ready"))).toBe(true);
-    expect(mockStore.bootstrap).toHaveBeenCalled();
-
-    const controlsToggle = tree!.root.findByProps({ testID: "controls-toggle" });
-
-    await ReactTestRenderer.act(async () => {
-      controlsToggle.props.onPress();
-    });
-
-    labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
-
+    expect(labels).toContain("Exit");
     expect(labels).toContain("Refresh");
-    expect(labels).toContain("Disconnect");
+    expect(labels).toContain("Reconnect");
+    expect(labels.some((label) => label.includes("Freedom ready"))).toBe(true);
+    expect(mockStore.bootstrap).toHaveBeenCalled();
   });
 
   test("shared refresh scroll interaction keeps overscroll enabled", () => {
@@ -205,11 +198,11 @@ describe("refresh affordances", () => {
 
     const labels = tree!.root.findAll((node) => typeof node.props.children !== "undefined").flatMap((node) => flattenText(node.props.children));
 
-    expect(labels).toContain("Chats");
+    expect(labels).toContain("Build");
     expect(labels).toContain("Voice");
-    expect(labels).not.toContain("Adam Connect");
-    expect(labels).not.toContain("Refresh");
-    expect(labels).not.toContain("Disconnect");
+    expect(labels).toContain("Overview");
+    expect(labels).toContain("Talk");
+    expect(labels).toContain("Reconnect");
   });
 
   test("shows a mute control while the live voice loop is active", async () => {

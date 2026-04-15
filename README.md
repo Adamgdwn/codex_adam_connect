@@ -1,8 +1,12 @@
-# Adam Connect
+# Freedom Connect Runtime
 
-Adam Connect turns a paired phone into a remote chat surface for the local Codex CLI running on this computer.
-It now also supports a natural-feeling live voice loop, so your desktop coding partner can actually feel like it is in your pocket instead of trapped behind a one-shot mic button.
-It also now supports wake-on-request through a tiny LAN relay and manual outbound email of completed Codex replies, so the homebase can sleep when idle and still send polished updates outside the chat tunnel when you choose.
+This repository now serves as the runtime layer for the user-facing `Freedom` product on
+desktop and phone.
+
+It turns a paired phone into a remote Freedom companion for the local desktop runtime
+running on this computer. It also supports a natural-feeling live voice loop, wake on
+request, and controlled outbound email so the desktop shell and phone app can feel like
+one Freedom system rather than separate tools.
 
 ## Status Snapshot
 
@@ -15,11 +19,11 @@ This repository is the active home for the Adam Connect work:
 - repo path: `/home/adamgoodwin/code/agents/codex_adam_connect`
 - supported desktop entrypoint: `npm run launch`
 - supported desktop UI: the Electron shell
-- intended phone role: trusted remote operator console for Codex running on this desktop
+- intended phone role: trusted Freedom companion for the desktop runtime on this machine
 
 The Electron shell now includes the desktop dashboard inside the app and should expose:
 
-- `Operator`
+- `Freedom`
 - `Phone Setup`
 - `Activity`
 - `Devices`
@@ -29,7 +33,7 @@ The Electron shell now includes the desktop dashboard inside the app and should 
 The `Phone Setup` flow is meant to stay inside the app now, with:
 
 - a `Phone Setup` tab in the desktop shell
-- a compact QR card on the `Operator` tab
+- a compact QR card on the `Freedom` tab
 - a larger QR in the `Phone Setup` tab
 - the browser reserved mainly for APK download and recovery links
 
@@ -122,7 +126,7 @@ The `Phone Setup` flow is meant to stay inside the app now, with:
 - the shell centers the `Operator` flow and exposes `Operator`, `Activity`, `Devices`, `Workspaces`, and `Settings`
 - `npm run launch` now prefers the native shell when a GUI session is available, while `npm run launch:no-open` remains the headless path
 - `npm run app:desktop:install-launcher` installs a Linux desktop-menu launcher for the native operator console
-- the phone keeps a default `Operator` chat path for quick remote turns
+- the phone keeps a default `Freedom` chat path for quick remote turns
 - the phone now includes a project-start wizard that can kick off a project chat with goal, output shape, template, and reply style in one step
 - pairing codes stay stable across normal desktop restarts, and stale phone tokens can enter a repair flow instead of a full cold start
 - realtime websocket auth now uses short-lived tickets instead of passing long-lived device tokens directly

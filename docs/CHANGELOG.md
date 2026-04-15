@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- rebranded the supported desktop shell and mobile companion around `Freedom` while
+  keeping Connect as the runtime and transport layer underneath
+- added shared Freedom session identity metadata so desktop and phone surfaces can refer
+  to the same assistant and audit correlation
 - replaced the old one-shot voice helper with a continuous voice session loop that keeps listening between turns, shows live transcript/audio state, starts TTS from streamed assistant deltas, and stops cleanly on barge-in
 - made Android voice playback more reliable by pausing speech recognition while reply audio is starting, then resuming the live voice loop immediately after each spoken reply
 - added an Expo speech-output fallback on Android so spoken replies no longer depend on a single flaky phone-local TTS backend

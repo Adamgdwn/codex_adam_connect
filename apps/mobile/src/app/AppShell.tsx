@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Keyboard, Platform, Pressable, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { FREEDOM_PRODUCT_NAME, FREEDOM_RUNTIME_NAME } from "@adam-connect/shared";
 import { Banner, StatusChip } from "./components";
 import { styles } from "./mobileStyles";
 import { ChatScreen, HostScreen, PairingScreen, SessionsScreen } from "./screens";
@@ -14,7 +15,6 @@ export function AppShell(): React.JSX.Element {
   const setField = useAppStore((state) => state.setField);
   const selectSession = useAppStore((state) => state.selectSession);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [controlsExpanded, setControlsExpanded] = useState(store.view === "host");
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -57,32 +57,24 @@ export function AppShell(): React.JSX.Element {
   const handleRefresh = () => {
     store.refresh().catch((error) => console.warn(error));
   };
-  const refreshLabel = store.refreshing ? "Refreshing..." : "Refresh";
-  const talkLabel = store.voiceSessionActive ? "End Voice" : "Start Voice";
   const muteLabel = store.voiceMuted ? "Unmute" : "Mute";
-  const controlsLabel = controlsExpanded ? "Hide Controls" : "Show Controls";
   const voiceStatus = humanizeVoiceStatus(store);
-  const chatHeaderSession = store.sessions.find((item) => item.id === store.selectedSessionId) ?? store.sessions[0] ?? null;
-  const isChatView = store.view === "chat";
-  const isSessionsView = store.view === "sessions";
-  const isCompactChromeView = isChatView || isSessionsView;
-  const compactTitle = isChatView ? chatHeaderSession?.title ?? "Chat" : "Chats";
-  const compactSubtitle = isChatView
-    ? `${humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · ${store.realtimeConnected ? "Live sync on" : "Reconnecting"}`
-    : `${store.sessions.length} saved · ${store.realtimeConnected ? "Live sync on" : "Reconnecting"}`;
-
-  useEffect(() => {
-    if (isCompactChromeView) {
-      setControlsExpanded(false);
-    }
-  }, [isCompactChromeView]);
+  const hostStatusLabel = store.hostStatus?.host.isOnline ? "Host online" : "Host offline";
+  const codexStatusLabel = humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out");
+  const realtimeStatusLabel = store.realtimeConnected ? "Live sync on" : "Reconnecting";
+  const primarySubtitle =
+    store.view === "chat"
+      ? "Talk to Freedom from the same operator system you use on desktop."
+      : store.view === "sessions"
+        ? "Build new work, launch structured chats, and keep active projects moving."
+        : "Connection, voice, and device controls for the Freedom companion.";
 
   if (store.booting) {
     return (
       <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
         <View style={styles.heroCard}>
-          <Text style={styles.eyebrow}>Adam Connect v1</Text>
-          <Text style={styles.heroTitle}>Desktop-grade Codex, now one scan from your phone.</Text>
+          <Text style={styles.eyebrow}>{FREEDOM_RUNTIME_NAME}</Text>
+          <Text style={styles.heroTitle}>{FREEDOM_PRODUCT_NAME}, one scan from your phone.</Text>
           <Text style={styles.heroBody}>Loading paired device state and restoring your phone link…</Text>
         </View>
       </SafeAreaView>
@@ -121,13 +113,19 @@ export function AppShell(): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
-      {isCompactChromeView ? (
-        <View style={[styles.header, styles.chatAppHeader]}>
-          <View style={styles.chatAppHeaderCopy}>
-            <Text style={styles.chatAppHeaderTitle}>{compactTitle}</Text>
-            <Text style={styles.chatAppHeaderSubtitle}>{compactSubtitle}</Text>
+      <View style={styles.shellHeaderCard}>
+        <View style={styles.shellHeaderTop}>
+          <View style={styles.shellBrandCluster}>
+            <View style={styles.shellBrandMark}>
+              <Text style={styles.shellBrandMarkLabel}>OWL</Text>
+            </View>
+            <View style={styles.shellBrandCopy}>
+              <Text style={styles.eyebrow}>{FREEDOM_RUNTIME_NAME}</Text>
+              <Text style={styles.shellBrandTitle}>{FREEDOM_PRODUCT_NAME}</Text>
+              <Text style={styles.shellBrandSubtitle}>{primarySubtitle}</Text>
+            </View>
           </View>
-          <View style={styles.chatAppHeaderActions}>
+          <View style={styles.shellHeaderActions}>
             <Pressable style={[styles.iconButton, store.refreshing ? styles.disabledButton : null]} onPress={handleRefresh} disabled={store.refreshing}>
               <Text style={styles.iconButtonLabel}>↻</Text>
             </Pressable>
@@ -147,104 +145,56 @@ export function AppShell(): React.JSX.Element {
                 <Text style={[styles.iconButtonLabel, store.voiceMuted ? styles.warningButtonLabel : null]}>{muteLabel}</Text>
               </Pressable>
             ) : null}
-            <Pressable testID="controls-toggle" style={styles.iconButton} onPress={() => setControlsExpanded((value) => !value)}>
-              <Text style={styles.iconButtonLabel}>⚙</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>Private Operator Link</Text>
-            <Text style={styles.brand}>Adam Connect</Text>
-            <Text style={styles.subtitle}>{store.hostStatus?.host.hostName ?? "Desktop host"}</Text>
-            <View style={styles.headerMetaRow}>
-              <Pressable
-                testID="controls-toggle"
-                style={[styles.secondaryButton, styles.headerMenuButton]}
-                onPress={() => setControlsExpanded((value) => !value)}
-              >
-                <Text style={styles.secondaryLabel}>{controlsLabel}</Text>
-              </Pressable>
-              <Text style={styles.headerStatusText}>
-                {humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} · {store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.headerActions}>
             <Pressable
-              style={[styles.secondaryButton, styles.headerActionButton, !store.voiceAvailable ? styles.warningButton : null]}
-              onPress={handleTalkPress}
-            >
-              <Text style={[styles.secondaryLabel, !store.voiceAvailable ? styles.warningButtonLabel : null]}>{talkLabel}</Text>
-            </Pressable>
-            {store.voiceSessionActive ? (
-              <Pressable
-                style={[styles.secondaryButton, styles.headerActionButton, store.voiceMuted ? styles.warningButton : null]}
-                onPress={() => store.toggleVoiceMute().catch((error) => console.warn(error))}
-              >
-                <Text style={[styles.secondaryLabel, store.voiceMuted ? styles.warningButtonLabel : null]}>{muteLabel}</Text>
-              </Pressable>
-            ) : null}
-            <Text
-              style={[
-                styles.voiceStatusText,
-                store.voiceAvailable && store.realtimeConnected && store.hostStatus?.auth.status === "logged_in"
-                  ? styles.voiceStatusReady
-                  : styles.voiceStatusWarning
-              ]}
-            >
-              {voiceStatus}
-            </Text>
-            <Pressable
-              style={styles.disconnectButton}
+              style={styles.iconButton}
               onPress={() => {
                 store.disconnect().catch((error) => console.warn(error));
               }}
             >
-              <Text style={styles.disconnectLabel}>Disconnect</Text>
+              <Text style={styles.iconButtonLabel}>Exit</Text>
             </Pressable>
           </View>
         </View>
-      )}
 
-      {controlsExpanded ? (
-        <View style={styles.topPanel}>
-          <View style={styles.statusRow}>
-            <StatusChip label={store.hostStatus?.host.isOnline ? "Host online" : "Host offline"} tone={store.hostStatus?.host.isOnline ? "teal" : "orange"} />
-            <StatusChip label={humanizeCodexState(store.hostStatus?.auth.status ?? "logged_out")} tone={store.hostStatus?.auth.status === "logged_in" ? "teal" : "orange"} />
-            <StatusChip label={store.realtimeConnected ? "Live sync on" : "Live sync reconnecting"} tone={store.realtimeConnected ? "teal" : "orange"} />
-          </View>
-          <View style={styles.nav}>
-            {(["host", "sessions", "chat"] as const).map((view) => (
-              <Pressable
-                key={view}
-                style={[styles.navButton, store.view === view ? styles.navButtonActive : null]}
-                onPress={() => handleNavPress(view)}
-              >
-                <Text style={[styles.navLabel, store.view === view ? styles.navLabelActive : null]}>{labelForView(view)}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.topActions}>
-            <Pressable
-              style={[styles.secondaryButton, styles.topActionButton, store.refreshing ? styles.disabledButton : null]}
-              onPress={handleRefresh}
-              disabled={store.refreshing}
-            >
-              <Text style={styles.secondaryLabel}>{refreshLabel}</Text>
-            </Pressable>
-            <Pressable
-              style={styles.disconnectButton}
-              onPress={() => {
-                store.disconnect().catch((error) => console.warn(error));
-              }}
-            >
-              <Text style={styles.disconnectLabel}>Disconnect</Text>
-            </Pressable>
-          </View>
+        <View style={styles.statusRow}>
+          <StatusChip label={hostStatusLabel} tone={store.hostStatus?.host.isOnline ? "teal" : "orange"} />
+          <StatusChip label={codexStatusLabel} tone={store.hostStatus?.auth.status === "logged_in" ? "teal" : "orange"} />
+          <StatusChip label={realtimeStatusLabel} tone={store.realtimeConnected ? "teal" : "orange"} />
         </View>
-      ) : null}
+
+        <View style={styles.nav}>
+          {(["host", "sessions", "chat"] as const).map((view) => (
+            <Pressable
+              key={view}
+              style={[styles.navButton, store.view === view ? styles.navButtonActive : null]}
+              onPress={() => handleNavPress(view)}
+            >
+              <Text style={[styles.navLabel, store.view === view ? styles.navLabelActive : null]}>{labelForView(view)}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.topPanel}>
+        <Text style={styles.panelLead}>
+          {store.hostStatus?.host.hostName ?? "Desktop host"} · {voiceStatus}
+        </Text>
+        <View style={styles.topActions}>
+          <Pressable
+            style={[styles.secondaryButton, styles.topActionButton, store.refreshing ? styles.disabledButton : null]}
+            onPress={handleRefresh}
+            disabled={store.refreshing}
+          >
+            <Text style={styles.secondaryLabel}>{store.refreshing ? "Refreshing..." : "Refresh"}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.secondaryButton, styles.topActionButton]}
+            onPress={() => store.reconnectRealtime().catch((error) => console.warn(error))}
+          >
+            <Text style={styles.secondaryLabel}>Reconnect</Text>
+          </Pressable>
+        </View>
+      </View>
 
       {store.notice ? <Banner text={store.notice} tone="info" /> : null}
       {store.error ? <Banner text={store.error} tone="error" /> : null}
@@ -257,7 +207,7 @@ export function AppShell(): React.JSX.Element {
           onRefresh={handleRefresh}
           keyboardInset={keyboardInset}
           composerBottomPadding={composerBottomPadding}
-          manualToolsVisible={controlsExpanded}
+          manualToolsVisible
         />
       ) : null}
     </SafeAreaView>
@@ -266,22 +216,22 @@ export function AppShell(): React.JSX.Element {
 
 function labelForView(view: "host" | "sessions" | "chat"): string {
   if (view === "host") {
-    return "Host";
+    return "Overview";
   }
   if (view === "sessions") {
-    return "Chats";
+    return "Build";
   }
-  return "Chat";
+  return "Talk";
 }
 
 function humanizeCodexState(status: "logged_in" | "logged_out" | "error"): string {
   if (status === "logged_in") {
-    return "Codex ready";
+    return "Freedom ready";
   }
   if (status === "error") {
-    return "Codex needs attention";
+    return "Freedom needs attention";
   }
-  return "Codex login required";
+  return "Freedom login required";
 }
 
 function humanizeVoiceStatus(store: AppState): string {
@@ -301,7 +251,7 @@ function humanizeVoiceStatus(store: AppState): string {
     return "Desktop offline";
   }
   if (store.hostStatus?.auth.status !== "logged_in") {
-    return "Codex needs login";
+    return "Freedom needs login";
   }
   return "Ready for voice";
 }

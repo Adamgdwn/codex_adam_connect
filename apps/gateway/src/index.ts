@@ -76,6 +76,13 @@ function readBearer(req: IncomingMessage): string {
   return token;
 }
 
+function assertLoopbackRequest(req: IncomingMessage): void {
+  const remoteAddress = req.socket.remoteAddress ?? "";
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress)) {
+    throw new Error("Desktop shell controls are only available on this desktop.");
+  }
+}
+
 function addSubscription(hostId: string, socket: import("ws").WebSocket): void {
   const sockets = subscriptions.get(hostId) ?? new Set<import("ws").WebSocket>();
   sockets.add(socket);
@@ -130,6 +137,33 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (method === "GET" && url.pathname === "/api/desktop-shell/state") {
+      assertLoopbackRequest(req);
+      sendJson(res, 200, await store.getDesktopShellState());
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/api/desktop-shell/session") {
+      assertLoopbackRequest(req);
+      sendJson(res, 200, await store.ensureDesktopShellSession());
+      return;
+    }
+
+    if (method === "POST" && /^\/api\/desktop-shell\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+      assertLoopbackRequest(req);
+      const sessionId = url.pathname.split("/")[4];
+      const parsed = postMessageRequestSchema.parse(await readJson(req));
+      sendJson(res, 200, await store.postDesktopShellMessage(sessionId, parsed));
+      return;
+    }
+
+    if (method === "POST" && /^\/api\/desktop-shell\/sessions\/[^/]+\/stop$/.test(url.pathname)) {
+      assertLoopbackRequest(req);
+      const sessionId = url.pathname.split("/")[4];
+      sendJson(res, 200, await store.stopDesktopShellSession(sessionId));
+      return;
+    }
+
     if (method === "GET" && url.pathname === "/healthz") {
       sendJson(res, 200, { ok: true });
       return;
@@ -145,7 +179,7 @@ const server = createServer(async (req, res) => {
       res.statusCode = 200;
       res.setHeader("content-type", "application/vnd.android.package-archive");
       res.setHeader("content-length", String(artifact.sizeBytes));
-      res.setHeader("content-disposition", 'attachment; filename="adam-connect.apk"');
+      res.setHeader("content-disposition", 'attachment; filename="freedom.apk"');
       res.setHeader("x-content-type-options", "nosniff");
       res.setHeader("x-download-options", "noopen");
       res.setHeader("cache-control", "no-store, no-cache, must-revalidate, proxy-revalidate");

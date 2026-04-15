@@ -42,6 +42,11 @@ import type {
   UpdateSessionRequest,
   WakeControl
 } from "@adam-connect/shared";
+import {
+  FREEDOM_PRIMARY_SESSION_TITLE,
+  FREEDOM_PRODUCT_NAME,
+  isPrimaryFreedomSessionTitle
+} from "@adam-connect/shared";
 import { createEmailProvider, renderOutboundEmail, resolveOutboundEmailStatus } from "./outboundEmail.js";
 import { resolveWakeControl } from "./wakeControl.js";
 
@@ -71,6 +76,12 @@ interface GatewayState {
   auditEvents: AuditEvent[];
 }
 
+interface DesktopShellState {
+  overview: GatewayOverview;
+  desktopSession: ChatSession | null;
+  desktopMessages: ChatMessage[];
+}
+
 type Principal =
   | { kind: "host"; host: HostRecord }
   | { kind: "device"; host: HostRecord; device: DeviceRecord };
@@ -87,13 +98,13 @@ interface RealtimeTicketRecord {
 
 const defaultAuthState: HostAuthState = {
   status: "logged_out",
-  detail: "Desktop host has not reported Codex auth yet."
+  detail: "Desktop host has not reported Freedom auth yet."
 };
 
 const defaultTailscaleStatus: TailscaleStatus = {
   installed: false,
   connected: false,
-  detail: "Desktop host has not reported Tailscale status yet.",
+  detail: "Desktop host has not reported Freedom runtime network status yet.",
   dnsName: null,
   ipv4: null,
   suggestedUrl: null,
@@ -394,7 +405,7 @@ export class GatewayStore {
     if (!device) {
       throw new Error("Device not found.");
     }
-    await this.sendNotification(state, principal.host.id, device, event, "Adam Connect test notification");
+    await this.sendNotification(state, principal.host.id, device, event, "Freedom test notification");
     this.addAuditEvent(state, {
       hostId: principal.host.id,
       deviceId: device.id,
@@ -581,17 +592,25 @@ export class GatewayStore {
 
     const now = nowIso();
     const existingCount = state.sessions.filter((item) => item.deviceId === principal.device.id).length;
+    const sessionId = createId("session");
     const session: SessionRecord = {
-      id: createId("session"),
+      id: sessionId,
       hostId: principal.host.id,
       deviceId: principal.device.id,
-      title: input.title?.trim() || `Chat ${existingCount + 1}`,
+      title:
+        input.title?.trim() ||
+        (input.kind === "operator" ? FREEDOM_PRIMARY_SESSION_TITLE : `Chat ${existingCount + 1}`),
       kind: input.kind ?? "project",
       pinned: input.kind === "operator",
       archived: false,
       rootPath,
       threadId: null,
       status: "idle",
+      identity: buildSessionIdentity({
+        sessionId,
+        originSurface: input.originSurface ?? "mobile_companion",
+        workspaceContext: rootPath
+      }),
       activeTurnId: null,
       stopRequested: false,
       lastError: null,
@@ -609,6 +628,8 @@ export class GatewayStore {
       deviceId: principal.device.id,
       sessionId: session.id,
       type: "session_created",
+      originSurface: session.identity.originSurface,
+      auditCorrelationId: session.identity.auditCorrelationId,
       detail: `${session.kind}:${session.title}`
     });
     await this.writeState(state);
@@ -736,7 +757,7 @@ export class GatewayStore {
       if (pending) {
         pending.status = "interrupted";
         pending.updatedAt = nowIso();
-        pending.errorMessage = "Cancelled before Codex started running.";
+        pending.errorMessage = "Cancelled before Freedom started running.";
         this.emitMessage(principal.host.id, pending);
       }
       targetSession.status = "idle";
@@ -977,7 +998,7 @@ export class GatewayStore {
       const assistantMessage = this.requireMessage(state, assistantMessageId, session.id);
       assistantMessage.status = "interrupted";
       assistantMessage.updatedAt = nowIso();
-      assistantMessage.errorMessage = "Run stopped from the mobile app.";
+      assistantMessage.errorMessage = "Run stopped from Freedom.";
       this.emitMessage(principal.host.id, assistantMessage);
     }
 
@@ -1002,7 +1023,7 @@ export class GatewayStore {
 
   async getOverview(): Promise<GatewayOverview> {
     const state = await this.readState();
-    const host = [...state.hosts].sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))[0] ?? null;
+    const host = getLatestHostRecord(state);
     if (!host) {
       return {
         hostStatus: null,
@@ -1050,6 +1071,199 @@ export class GatewayStore {
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         .slice(0, 12)
     };
+  }
+
+  async getDesktopShellState(): Promise<DesktopShellState> {
+    const overview = await this.getOverview();
+    const hostId = overview.hostStatus?.host.id;
+    if (!hostId) {
+      return {
+        overview,
+        desktopSession: null,
+        desktopMessages: []
+      };
+    }
+
+    const state = await this.readState();
+    const session =
+      [...state.sessions]
+        .filter(
+          (item) => item.hostId === hostId && item.kind === "operator" && item.identity.originSurface === "desktop_shell" && !item.archived
+        )
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+
+    return {
+      overview,
+      desktopSession: session ? toPublicSession(session) : null,
+      desktopMessages: session
+        ? state.messages
+            .filter((item) => item.sessionId === session.id)
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        : []
+    };
+  }
+
+  async ensureDesktopShellSession(rootPath?: string): Promise<ChatSession> {
+    const state = await this.readState();
+    const host = getLatestHostRecord(state);
+    if (!host) {
+      throw new Error("Register the desktop host before opening the partner desk.");
+    }
+
+    const existing =
+      [...state.sessions]
+        .filter(
+          (item) => item.hostId === host.id && item.kind === "operator" && item.identity.originSurface === "desktop_shell" && !item.archived
+        )
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+    if (existing) {
+      return toPublicSession(existing);
+    }
+
+    const resolvedRoot = rootPath ?? host.approvedRoots[0];
+    if (!host.approvedRoots.includes(resolvedRoot)) {
+      throw new Error("Requested root is not approved for this host.");
+    }
+
+    const now = nowIso();
+    const sessionId = createId("session");
+    const session: SessionRecord = {
+      id: sessionId,
+      hostId: host.id,
+      deviceId: buildDesktopShellDeviceId(host.id),
+      title: FREEDOM_PRIMARY_SESSION_TITLE,
+      kind: "operator",
+      pinned: true,
+      archived: false,
+      rootPath: resolvedRoot,
+      threadId: null,
+      status: "idle",
+      identity: buildSessionIdentity({
+        sessionId,
+        originSurface: "desktop_shell",
+        workspaceContext: resolvedRoot
+      }),
+      activeTurnId: null,
+      stopRequested: false,
+      lastError: null,
+      lastPreview: null,
+      lastActivityAt: now,
+      createdAt: now,
+      updatedAt: now,
+      claimedMessageId: null,
+      stopClaimedAt: null
+    };
+
+    state.sessions.push(session);
+    this.addAuditEvent(state, {
+      hostId: host.id,
+      deviceId: null,
+      sessionId: session.id,
+      type: "desktop_session_opened",
+      originSurface: session.identity.originSurface,
+      auditCorrelationId: session.identity.auditCorrelationId,
+      detail: session.title
+    });
+    await this.writeState(state);
+    this.emitSession(session);
+    return toPublicSession(session);
+  }
+
+  async postDesktopShellMessage(sessionId: string, input: PostMessageRequest): Promise<ChatMessage> {
+    const state = await this.readState();
+    const host = getLatestHostRecord(state);
+    if (!host) {
+      throw new Error("Register the desktop host before posting a partner message.");
+    }
+
+    const session = this.requireSessionForHostState(state, sessionId, host.id);
+    if (session.identity.originSurface !== "desktop_shell") {
+      throw new Error("Desktop shell can only post into local desktop partner sessions.");
+    }
+    if (session.activeTurnId || session.status === "queued" || session.status === "stopping") {
+      throw new Error("Freedom is already working on the current turn.");
+    }
+
+    const now = nowIso();
+    const message: ChatMessage = {
+      id: createId("msg"),
+      sessionId: session.id,
+      role: "user",
+      content: input.text.trim(),
+      status: "pending",
+      errorMessage: null,
+      inputMode: input.inputMode ?? "text",
+      responseStyle: input.responseStyle ?? "executive",
+      transcriptPolished: input.transcriptPolished ?? false,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    state.messages.push(message);
+    session.status = "queued";
+    session.updatedAt = now;
+    session.lastError = null;
+    session.lastPreview = truncatePreview(input.text.trim());
+    session.lastActivityAt = now;
+
+    this.addAuditEvent(state, {
+      hostId: host.id,
+      deviceId: null,
+      sessionId: session.id,
+      type: "message_posted",
+      originSurface: session.identity.originSurface,
+      auditCorrelationId: session.identity.auditCorrelationId,
+      detail: `desktop_shell:${input.inputMode ?? "text"}:${input.responseStyle ?? "executive"}`
+    });
+    await this.writeState(state);
+    this.emitMessage(host.id, message);
+    this.emitSession(session);
+    return message;
+  }
+
+  async stopDesktopShellSession(sessionId: string): Promise<ChatSession> {
+    const state = await this.readState();
+    const host = getLatestHostRecord(state);
+    if (!host) {
+      throw new Error("Register the desktop host before stopping a partner session.");
+    }
+
+    const session = this.requireSessionForHostState(state, sessionId, host.id);
+    if (session.identity.originSurface !== "desktop_shell") {
+      throw new Error("Desktop shell can only stop local desktop partner sessions.");
+    }
+
+    if (session.activeTurnId) {
+      session.stopRequested = true;
+      session.status = "stopping";
+      session.stopClaimedAt = null;
+      session.updatedAt = nowIso();
+    } else {
+      const pending = [...state.messages]
+        .reverse()
+        .find((item: ChatMessage) => item.sessionId === session.id && item.role === "user" && item.status === "pending");
+      if (pending) {
+        pending.status = "interrupted";
+        pending.updatedAt = nowIso();
+        pending.errorMessage = "Cancelled before Freedom started running.";
+        this.emitMessage(host.id, pending);
+      }
+      session.status = "idle";
+      session.updatedAt = nowIso();
+    }
+
+    this.addAuditEvent(state, {
+      hostId: host.id,
+      deviceId: null,
+      sessionId: session.id,
+      type: "stop_requested",
+      originSurface: session.identity.originSurface,
+      auditCorrelationId: session.identity.auditCorrelationId,
+      detail: session.title
+    });
+    await this.writeState(state);
+    this.emitSession(session);
+    return toPublicSession(session);
   }
 
   private async requirePrincipal(token: string): Promise<Principal> {
@@ -1179,7 +1393,15 @@ export class GatewayStore {
 
   private addAuditEvent(
     state: GatewayState,
-    input: { hostId: string; deviceId: string | null; sessionId: string | null; type: string; detail: string | null }
+    input: {
+      hostId: string;
+      deviceId: string | null;
+      sessionId: string | null;
+      type: string;
+      originSurface?: "desktop_shell" | "mobile_companion" | null;
+      auditCorrelationId?: string | null;
+      detail: string | null;
+    }
   ): void {
     state.auditEvents.unshift({
       id: createId("audit"),
@@ -1187,6 +1409,8 @@ export class GatewayStore {
       deviceId: input.deviceId,
       sessionId: input.sessionId,
       type: input.type,
+      originSurface: input.originSurface ?? null,
+      auditCorrelationId: input.auditCorrelationId ?? null,
       detail: input.detail,
       createdAt: nowIso()
     });
@@ -1378,6 +1602,7 @@ function toPublicSession(session: SessionRecord): ChatSession {
     rootPath: session.rootPath,
     threadId: session.threadId,
     status: session.status,
+    identity: session.identity,
     activeTurnId: session.activeTurnId,
     stopRequested: session.stopRequested,
     lastError: session.lastError,
@@ -1386,6 +1611,10 @@ function toPublicSession(session: SessionRecord): ChatSession {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt
   };
+}
+
+function getLatestHostRecord(state: GatewayState): HostRecord | null {
+  return [...state.hosts].sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt))[0] ?? null;
 }
 
 function isRecent(iso: string, thresholdMs: number): boolean {
@@ -1426,13 +1655,13 @@ function truncatePreview(value: string, maxLength = 140): string {
 function notificationTitleForEvent(event: NotificationEvent): string {
   switch (event) {
     case "approval_needed":
-      return "Adam Connect approval needed";
+      return "Freedom approval needed";
     case "repair_needed":
-      return "Adam Connect repair needed";
+      return "Freedom companion repair needed";
     case "run_failed":
-      return "Adam Connect run failed";
+      return "Freedom run failed";
     default:
-      return "Adam Connect run complete";
+      return "Freedom run complete";
   }
 }
 
@@ -1517,12 +1746,23 @@ function migrateState(input: Partial<GatewayState>): GatewayState {
     }),
     sessions: (input.sessions ?? []).map((session) => {
       const record = session as Partial<SessionRecord>;
-      const isOperator = record.title?.trim().toLowerCase() === "operator";
+      const isOperator = isPrimaryFreedomSessionTitle(record.title);
+      const sessionId = record.id ?? createId("session");
+      const workspaceContext = record.rootPath ?? null;
       return {
         ...record,
+        id: sessionId,
+        title: record.kind === "operator" && isOperator ? FREEDOM_PRIMARY_SESSION_TITLE : record.title,
         kind: record.kind ?? (isOperator ? "operator" : "project"),
         pinned: record.pinned ?? isOperator,
         archived: record.archived ?? false,
+        identity:
+          record.identity ??
+          buildSessionIdentity({
+            sessionId,
+            originSurface: "mobile_companion",
+            workspaceContext
+          }),
         lastPreview: record.lastPreview ?? null,
         lastActivityAt: record.lastActivityAt ?? record.updatedAt ?? now,
         claimedMessageId: record.claimedMessageId ?? null,
@@ -1550,6 +1790,39 @@ function migrateState(input: Partial<GatewayState>): GatewayState {
         updatedAt: record.updatedAt ?? record.createdAt ?? now
       } as OutboundRecipientRecord;
     }),
-    auditEvents: input.auditEvents ?? []
+    auditEvents: (input.auditEvents ?? []).map((event) => {
+      const record = event as Partial<AuditEvent>;
+      return {
+        ...record,
+        id: record.id ?? createId("audit"),
+        hostId: record.hostId ?? "",
+        deviceId: record.deviceId ?? null,
+        sessionId: record.sessionId ?? null,
+        type: record.type ?? "unknown",
+        originSurface: record.originSurface ?? null,
+        auditCorrelationId: record.auditCorrelationId ?? null,
+        detail: record.detail ?? null,
+        createdAt: record.createdAt ?? now
+      } as AuditEvent;
+    })
   };
+}
+
+function buildSessionIdentity(input: {
+  sessionId: string;
+  originSurface: "desktop_shell" | "mobile_companion";
+  workspaceContext: string | null;
+}) {
+  return {
+    productName: FREEDOM_PRODUCT_NAME,
+    assistantName: FREEDOM_PRODUCT_NAME,
+    freedomSessionId: input.sessionId,
+    originSurface: input.originSurface,
+    workspaceContext: input.workspaceContext,
+    auditCorrelationId: createId("auditcorr")
+  } as const;
+}
+
+function buildDesktopShellDeviceId(hostId: string): string {
+  return `desktop-shell:${hostId}`;
 }

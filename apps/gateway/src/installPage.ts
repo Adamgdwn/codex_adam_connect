@@ -4,6 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import QRCode from "qrcode";
 import type { ChatMessage, ChatSession, DesktopOverviewResponse, GatewayOverview, RecentSessionActivity } from "@adam-connect/shared";
+import {
+  FREEDOM_PRIMARY_SESSION_TITLE,
+  FREEDOM_PRODUCT_NAME,
+  FREEDOM_RUNTIME_NAME
+} from "@adam-connect/shared";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -25,6 +30,7 @@ interface InstallPageModel {
   installUrl: string;
   qrSvg: string;
   androidArtifact: AndroidArtifact | null;
+  desktopConsoleEnabled: boolean;
 }
 
 export async function buildInstallPageModel(
@@ -47,7 +53,8 @@ export async function buildInstallPageModel(
         light: "#fdf8ef"
       }
     }),
-    androidArtifact: await findAndroidArtifact()
+    androidArtifact: await findAndroidArtifact(),
+    desktopConsoleEnabled: isLoopbackRequest(req)
   };
 }
 
@@ -68,12 +75,13 @@ export async function buildDesktopOverviewResponse(
   overview: GatewayOverview
 ): Promise<DesktopOverviewResponse> {
   const model = await buildInstallPageModel(req, overview);
+  const localBaseUrl = resolveLocalBaseUrl(req);
   return {
     overview: model.overview,
     publicBaseUrl: model.publicBaseUrl,
-    dashboardUrl: model.dashboardUrl,
+    dashboardUrl: `${localBaseUrl}/`,
     installUrl: model.installUrl,
-    qrUrl: `${model.publicBaseUrl}/install/qr.svg`,
+    qrUrl: `${localBaseUrl}/install/qr.svg`,
     apkDownloadUrl: model.androidArtifact ? `${model.publicBaseUrl}/downloads/android/latest.apk` : null,
     androidArtifact: model.androidArtifact
       ? {
@@ -85,327 +93,502 @@ export async function buildDesktopOverviewResponse(
 }
 
 export function renderDesktopPage(model: InstallPageModel): string {
-  const { overview, dashboardUrl, installUrl, publicBaseUrl, qrSvg, androidArtifact } = model;
+  const { overview, dashboardUrl, installUrl, publicBaseUrl, qrSvg, androidArtifact, desktopConsoleEnabled } = model;
   const hostStatus = overview.hostStatus;
   const suggestedUrl = hostStatus?.tailscale.suggestedUrl ?? publicBaseUrl;
   const apkDownloadUrl = androidArtifact ? `${publicBaseUrl}/downloads/android/latest.apk` : null;
   const pairingCode = hostStatus?.host.pairingCode ?? "Waiting";
   const codexState = humanizeAuth(hostStatus?.auth.status ?? "logged_out");
-  const codexDetail = hostStatus?.auth.detail ?? "Desktop host has not published Codex status yet.";
+  const codexDetail = hostStatus?.auth.detail ?? "Desktop host has not published Freedom runtime status yet.";
   const tailscaleState = hostStatus?.tailscale.connected ? "Tailscale ready" : "Tailscale needs attention";
   const tailscaleDetail = hostStatus?.tailscale.detail ?? "Waiting for Tailscale status.";
   const roots = hostStatus?.host.approvedRoots ?? [];
   const recentSessionActivity = overview.recentSessionActivity;
   const recentDevices = overview.recentDevices;
   const auditEvents = overview.auditEvents;
+  const primaryActivity = recentSessionActivity[0] ?? null;
+  const attentionEvents = auditEvents.filter((event) => /(approval|repair|failed|error)/i.test(event.type));
+  const recentPartnerSummary = primaryActivity
+    ? primaryActivity.latestAssistantMessage?.content?.trim() || primaryActivity.session.lastPreview || primaryActivity.session.title
+    : "No active Freedom conversation yet. Pair the phone or open the desktop shell to begin.";
+  const partnerPosture =
+    hostStatus?.availability === "ready"
+      ? "Freedom is online, paired, and ready to help run the day from desktop or phone."
+      : "Freedom needs attention before it can act like a dependable partner across both surfaces.";
 
   return renderPage({
-    title: "Adam Connect Desktop",
-    description: "Launch, monitor, and pair Adam Connect from a clean desktop dashboard.",
+    title: "Freedom Desktop",
+    description: "Launch, monitor, and pair Freedom from a clean desktop dashboard.",
     body: `
-      <main class="shell">
-        <section class="hero panel">
-          <div class="hero-copy">
-            <span class="eyebrow">Adam Connect Desktop</span>
-            <h1>Launch once. Pair fast. Keep Codex on your own machine.</h1>
-            <p class="lede">
-              This desktop dashboard is the home base for the whole system. It keeps the local Codex login on the
-              desktop, gives your phone a safe install path over Tailscale, and keeps the setup simple enough to use
-              like a real app.
-            </p>
-            <div class="button-row">
-              <a class="button button-primary" href="#phone-setup" data-tab-open="phone-setup">Open Phone Setup</a>
-              ${
-                apkDownloadUrl
-                  ? `<a class="button button-secondary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
-                  : `<span class="button button-muted">Android APK not built yet</span>`
-              }
-              <a class="button button-ghost" href="#phone-setup" data-tab-open="phone-setup">Show QR In App</a>
-            </div>
-            <div class="status-row">
-              <span class="pill pill-teal">${hostStatus?.host.isOnline ? "Host online" : "Host offline"}</span>
-              <span class="pill pill-navy">${escapeHtml(codexState)}</span>
-              <span class="pill pill-orange">${escapeHtml(tailscaleState)}</span>
+      <main class="shell shell-studio">
+        <header class="studio-topbar panel">
+          <div class="studio-brand">
+            <span class="brand-mark">F</span>
+            <div class="brand-copy">
+              <strong>Freedom Engine</strong>
+              <span>Desktop operator shell</span>
             </div>
           </div>
-          <div class="hero-side">
-            <div class="callout">
-              <span class="label">Current pairing code</span>
-              <div class="code-line">
-                <strong class="pair-code">${escapeHtml(pairingCode)}</strong>
-                <button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy</button>
-              </div>
-              <p>Use this code from the phone app after entering the desktop URL.</p>
-            </div>
-            <div class="callout">
-              <span class="label">Phone-safe desktop URL</span>
-              <div class="stack gap-sm">
-                <code>${escapeHtml(suggestedUrl)}</code>
-                <button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy URL</button>
-              </div>
-              <p>The launcher and phone onboarding page both point here so the setup stays consistent.</p>
-            </div>
+          <label class="studio-search">
+            <span>Command</span>
+            <input type="text" value="" placeholder="Search commands, projects, agents, memory, files..." readonly />
+          </label>
+          <div class="studio-top-status">
+            <span class="pill pill-teal">${hostStatus?.host.isOnline ? "Host online" : "Host offline"}</span>
+            <span class="pill pill-navy">${escapeHtml(codexState)}</span>
+            <span class="pill pill-navy">${hostStatus?.activeSessionCount ?? 0} live</span>
+            <span class="pill pill-navy">${hostStatus?.pairedDeviceCount ?? 0} mobile</span>
           </div>
-        </section>
+        </header>
 
-        <section class="metrics">
-          <article class="panel metric">
-            <span class="label">Active chats</span>
-            <strong>${hostStatus?.activeSessionCount ?? 0}</strong>
-            <p>Current Codex runs that are still in flight.</p>
-          </article>
-          <article class="panel metric">
-            <span class="label">Paired devices</span>
-            <strong>${hostStatus?.pairedDeviceCount ?? 0}</strong>
-            <p>Trusted phones connected to this desktop host.</p>
-          </article>
-          <article class="panel metric">
-            <span class="label">Approved roots</span>
-            <strong>${roots.length}</strong>
-            <p>Workspaces the phone is allowed to target.</p>
-          </article>
-          <article class="panel metric">
-            <span class="label">Android build</span>
-            <strong>${androidArtifact ? "Ready" : "Missing"}</strong>
-            <p>${
-              androidArtifact
-                ? `${escapeHtml(androidArtifact.fileName)}${androidArtifact.sizeBytes ? ` • ${escapeHtml(formatBytes(androidArtifact.sizeBytes))}` : ""}`
-                : "Build once and the download button lights up automatically."
-            }</p>
-          </article>
-        </section>
+        <nav class="studio-nav panel" aria-label="Desktop functions" role="tablist">
+          ${renderDesktopTabButton("workspaces", "Overview")}
+          ${renderDesktopTabButton("operator", "Studio", true)}
+          ${renderDesktopTabButton("projects", "Active Projects")}
+          ${renderDesktopTabButton("build", "Build")}
+          ${renderDesktopTabButton("phone-setup", "Connect")}
+          ${renderDesktopTabButton("activity", "Activity")}
+          ${renderDesktopTabButton("settings", "Settings")}
+        </nav>
 
         <section class="tab-shell">
-          <nav class="tab-bar panel" aria-label="Desktop functions" role="tablist">
-            ${renderDesktopTabButton("operator", "Operator", true)}
-            ${renderDesktopTabButton("phone-setup", "Phone Setup")}
-            ${renderDesktopTabButton("activity", "Activity")}
-            ${renderDesktopTabButton("devices", "Devices")}
-            ${renderDesktopTabButton("workspaces", "Workspaces")}
-            ${renderDesktopTabButton("settings", "Settings")}
-          </nav>
-
           <div class="tab-panel active" data-tab-panel="operator" role="tabpanel" aria-labelledby="tab-operator">
-            <section class="content-grid wide">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Operator Home</span>
-                    <h2>Keep the operator loop healthy</h2>
-                  </div>
-                </div>
-                <div class="stack gap-md">
-                  <div class="status-card">
-                    <strong>${escapeHtml(humanizeAvailability(hostStatus?.availability ?? "needs_attention"))}</strong>
-                    <p>The native shell is now the supported desktop home. Use this view to monitor readiness, recovery, and quick phone onboarding.</p>
-                  </div>
-                  <div class="status-card">
-                    <strong>Current run state: ${escapeHtml(humanizeRunState(hostStatus?.runState ?? "ready"))}</strong>
-                    <p>${escapeHtml(codexDetail)}</p>
-                  </div>
-                  <div class="status-card">
-                    <strong>Repair state: ${escapeHtml(humanizeRepairState(hostStatus?.repairState ?? "healthy"))}</strong>
-                    <p>${escapeHtml(tailscaleDetail)}</p>
-                  </div>
-                </div>
-              </article>
+            <section class="studio-workspace">
+              <aside class="studio-rail panel">
+                <button class="studio-rail-button active" type="button" data-tab-open="operator" data-studio-open="desk">Home</button>
+                <button class="studio-rail-button" type="button" data-tab-open="projects">Active Projects</button>
+                <button class="studio-rail-button" type="button" data-tab-open="build">Build</button>
+                <button class="studio-rail-button" type="button" data-tab-open="operator" data-studio-open="map">Memory</button>
+                <button class="studio-rail-button" type="button" data-tab-open="phone-setup">Connect</button>
+              </aside>
 
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Quick Actions</span>
-                    <h2>Open the phone, pair fast, recover cleanly</h2>
+              <aside class="studio-sidebar panel">
+                <details class="accordion-card" open>
+                  <summary>Mission Brief</summary>
+                  <div class="accordion-body">
+                    <p>${escapeHtml(partnerPosture)}</p>
+                    <p>${escapeHtml(recentPartnerSummary)}</p>
+                  </div>
+                </details>
+                <details class="accordion-card" open>
+                  <summary>Execution Signals</summary>
+                  <div class="accordion-body stack gap-sm">
+                    ${renderWorkbenchSignalCard("Run state", humanizeRunState(hostStatus?.runState ?? "ready"), `${humanizeRepairState(hostStatus?.repairState ?? "healthy")} · ${humanizeAvailability(hostStatus?.availability ?? "needs_attention")}`)}
+                    ${renderWorkbenchSignalCard("Decision queue", `${attentionEvents.length} item${attentionEvents.length === 1 ? "" : "s"}`, attentionEvents.length ? "Approvals, repairs, or failures are waiting for review." : "No urgent approvals or failures are waiting right now.")}
+                    ${renderWorkbenchSignalCard("Phone sync", `${recentDevices.length} trusted phone${recentDevices.length === 1 ? "" : "s"}`, recentDevices.length ? "Companion devices are attached to this desktop host." : "No phone is paired yet.")}
+                  </div>
+                </details>
+                <details class="accordion-card">
+                  <summary>Recent Threads</summary>
+                  <div class="accordion-body stack gap-sm">
+                    ${
+                      recentSessionActivity.length
+                        ? recentSessionActivity.slice(0, 4).map(renderWorkbenchSessionCard).join("")
+                        : `<div class="empty-state">No active work threads yet.</div>`
+                    }
+                  </div>
+                </details>
+              </aside>
+
+              <section class="studio-main panel">
+                <div class="editor-tabs">
+                  <button class="editor-tab active" type="button" data-studio-tab-target="desk">Partner Desk</button>
+                  <button class="editor-tab" type="button" data-studio-tab-target="map">Mission Map</button>
+                  <button class="editor-tab" type="button" data-studio-tab-target="ops">Ops Pulse</button>
+                </div>
+
+                <div class="studio-panel active" data-studio-panel="desk">
+                  <div class="studio-stats-grid">
+                    <div class="glow-card">
+                      <span class="glow-label">Pairing</span>
+                      <strong>${escapeHtml(pairingCode)}</strong>
+                      <p>Current mobile companion code.</p>
+                    </div>
+                    <div class="glow-card">
+                      <span class="glow-label">Companion URL</span>
+                      <strong>${escapeHtml(truncatePreview(suggestedUrl, 28))}</strong>
+                      <p>Shared mobile connection path.</p>
+                    </div>
+                    <div class="glow-card">
+                      <span class="glow-label">Approvals</span>
+                      <strong>${attentionEvents.length}</strong>
+                      <p>Items waiting for a decision.</p>
+                    </div>
+                    <div class="glow-card">
+                      <span class="glow-label">Roots</span>
+                      <strong>${roots.length}</strong>
+                      <p>Approved desktop workspaces.</p>
+                    </div>
+                  </div>
+
+                  <div class="quick-prompt-row studio-prompt-row">
+                    <button class="quick-prompt" type="button" data-partner-prompt="Give me the clearest picture of what matters most today across my active work.">Daily brief</button>
+                    <button class="quick-prompt" type="button" data-partner-prompt="Review the current work and tell me what needs my decision next.">Needs decision</button>
+                    <button class="quick-prompt" type="button" data-partner-prompt="Convert the current priorities into a practical execution plan with owners, dependencies, and risks.">Execution plan</button>
+                    <button class="quick-prompt" type="button" data-partner-prompt="Challenge my current direction and tell me what I am underestimating.">Challenge me</button>
+                  </div>
+
+                  ${
+                    desktopConsoleEnabled
+                      ? `
+                        <div
+                          class="stack gap-md"
+                          data-desktop-console
+                          data-state-url="/api/desktop-shell/state"
+                          data-session-url="/api/desktop-shell/session"
+                          data-session-base="/api/desktop-shell/sessions"
+                        >
+                          <div class="partner-topline">
+                            <div class="status-card partner-summary-card">
+                              <strong id="partner-session-title">${escapeHtml(FREEDOM_PRIMARY_SESSION_TITLE)}</strong>
+                              <p id="partner-session-meta">Opening the local partner desk on this desktop.</p>
+                            </div>
+                            <div class="partner-mini-metrics">
+                              <div class="mini-kpi">
+                                <span class="mini-kpi-label">Messages</span>
+                                <strong id="partner-message-count">0</strong>
+                              </div>
+                              <div class="mini-kpi">
+                                <span class="mini-kpi-label">Latest focus</span>
+                                <strong id="partner-focus-summary">Loading</strong>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="studio-console-shell">
+                            <div class="partner-transcript" id="partner-messages">
+                              <div class="empty-state">Loading the Freedom conversation on this desktop.</div>
+                            </div>
+                            <form class="partner-composer" id="partner-composer">
+                              <label class="composer-label" for="partner-input">What should Freedom work on right now?</label>
+                              <div class="command-bar-frame">
+                                <textarea id="partner-input" rows="5" placeholder="Ask for priorities, a plan, a draft, a hard call, or the next concrete move."></textarea>
+                                <div class="command-bar-help">
+                                  <span>Compact command surface for strategy, approvals, planning, and execution.</span>
+                                  <span class="keyboard-hint">Ctrl/Cmd + K</span>
+                                </div>
+                              </div>
+                              <div class="button-row">
+                                <button class="button button-primary" id="partner-send" type="submit">Send To Freedom</button>
+                                <button class="button button-secondary" id="partner-stop" type="button">Stop Run</button>
+                              </div>
+                            </form>
+                          </div>
+                        </div>
+                      `
+                      : `
+                        <div class="status-card">
+                          <strong>Interactive partner controls are local-only</strong>
+                          <p>This page is in read-only mode from a remote browser. Open the native Freedom Desktop shell on the computer itself to use the live partner conversation surface.</p>
+                        </div>
+                      `
+                  }
+                </div>
+
+                <div class="studio-panel" data-studio-panel="map" hidden>
+                  <div class="studio-grid-two">
+                    <div class="glow-card glow-card-large">
+                      <span class="glow-label">Mission map</span>
+                      <strong>What Freedom is carrying</strong>
+                      <p>${escapeHtml(recentPartnerSummary)}</p>
+                    </div>
+                    <div class="stack gap-sm">
+                      ${renderWorkbenchSignalCard("Desktop readiness", codexState, codexDetail)}
+                      ${renderWorkbenchSignalCard("Transport", hostStatus?.tailscale.connected ? "Tailscale ready" : "Needs attention", tailscaleDetail)}
+                    </div>
                   </div>
                 </div>
-                <div class="stack gap-sm">
-                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy Mobile URL</button></div>
-                  <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Pairing Code</button></div>
-                  <div class="button-row">
-                    <a class="button button-primary" href="#phone-setup" data-tab-open="phone-setup">Open Phone Setup Tab</a>
-                    <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
-                  </div>
-                  <div class="inline-qr-card">
-                    <div>
-                      <strong>Quick scan from this screen</strong>
-                      <p>Scan this from the phone without leaving the desktop app.</p>
+
+                <div class="studio-panel" data-studio-panel="ops" hidden>
+                  <div class="studio-grid-two">
+                    <div class="stack gap-sm">
+                      ${
+                        attentionEvents.length
+                          ? attentionEvents.slice(0, 5).map(renderAttentionEventCard).join("")
+                          : `<div class="empty-state">No urgent review items. Freedom is clear to keep executing.</div>`
+                      }
                     </div>
-                    <div class="qr-box qr-box-compact" aria-label="Adam Connect phone setup QR code">
-                      ${qrSvg}
+                    <div class="stack gap-sm">
+                      ${
+                        recentSessionActivity.length
+                          ? recentSessionActivity.slice(0, 4).map(renderWorkbenchSessionCard).join("")
+                          : `<div class="empty-state">No recent session activity yet.</div>`
+                      }
                     </div>
                   </div>
                 </div>
-              </article>
+              </section>
+
+              <aside class="studio-inspector panel">
+                <details class="accordion-card" open>
+                  <summary>Connect</summary>
+                  <div class="accordion-body stack gap-sm">
+                    <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy URL</button></div>
+                    <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Code</button></div>
+                    ${
+                      apkDownloadUrl
+                        ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="freedom.apk">Download APK</a>`
+                        : `<span class="button button-muted">Android APK not built yet</span>`
+                    }
+                  </div>
+                </details>
+                <details class="accordion-card" open>
+                  <summary>Approved roots</summary>
+                  <div class="accordion-body stack gap-sm">
+                    ${
+                      roots.length
+                        ? roots.slice(0, 4).map(renderWorkspaceContextCard).join("")
+                        : `<div class="empty-state">No approved roots yet.</div>`
+                    }
+                  </div>
+                </details>
+              </aside>
             </section>
           </div>
 
           <div class="tab-panel" data-tab-panel="phone-setup" role="tabpanel" aria-labelledby="tab-phone-setup" hidden>
-            <section class="content-grid wide">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Phone Setup</span>
-                    <h2>Pair the phone without leaving Adam Connect</h2>
+            <section class="content-grid single">
+              ${renderAccordionPanel(
+                "Mobile Connect",
+                "Phone pairing, APK delivery, and recovery",
+                `
+                  <div class="stack gap-md">
+                    <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy URL</button></div>
+                    <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Code</button></div>
+                    <details class="accordion-card" open>
+                      <summary>Fast path</summary>
+                      <div class="accordion-body">
+                        <p>Open the app on the phone, paste the URL or scan the QR, then enter the current pairing code.</p>
+                      </div>
+                    </details>
+                    <details class="accordion-card" open>
+                      <summary>Install package</summary>
+                      <div class="accordion-body stack gap-sm">
+                        ${
+                          apkDownloadUrl
+                            ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="freedom.apk">Download Android APK</a>`
+                            : `<span class="button button-muted">Android APK not built yet</span>`
+                        }
+                        <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
+                      </div>
+                    </details>
+                    <div class="qr-box qr-box-large" aria-label="Freedom phone setup QR code">${qrSvg}</div>
                   </div>
-                </div>
-                <div class="stack gap-md">
-                  <div class="token-row"><code>${escapeHtml(suggestedUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy Mobile URL</button></div>
-                  <div class="token-row emphasized"><strong class="pair-code">${escapeHtml(pairingCode)}</strong><button class="icon-button" type="button" data-copy="${escapeAttribute(pairingCode)}">Copy Pairing Code</button></div>
-                  <div class="status-card">
-                    <strong>Fast path</strong>
-                    <p>Open the app on the phone, scan the QR or paste the URL, then enter the pairing code shown here.</p>
-                  </div>
-                  <div class="button-row">
-                    ${
-                      apkDownloadUrl
-                        ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
-                        : `<span class="button button-muted">Android APK not built yet</span>`
-                    }
-                    <a class="button button-secondary" href="${escapeHtml(installUrl)}" target="_blank" rel="noreferrer">Open Recovery Page</a>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel section qr-panel">
-                <div class="section-head">
-                  <div>
-                    <span class="label">QR Code</span>
-                    <h2>Scan this from the phone</h2>
-                  </div>
-                </div>
-                <div class="qr-box qr-box-large" aria-label="Adam Connect phone setup QR code">
-                  ${qrSvg}
-                </div>
-                <p class="muted">This QR opens the install page using the same Tailscale desktop address shown in the app.</p>
-              </article>
+                `
+              )}
             </section>
           </div>
 
           <div class="tab-panel" data-tab-panel="activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
-            <section class="content-grid">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Recent Chats</span>
-                    <h2>See what Codex and the phone have been doing</h2>
-                  </div>
-                </div>
-                ${
-                  recentSessionActivity.length
-                    ? `<div class="list-grid">${recentSessionActivity.map(renderSessionCard).join("")}</div>`
-                    : `<div class="empty-state">No chat sessions yet. Pair the phone, start a chat, and it will show up here.</div>`
-                }
-              </article>
-
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Audit Timeline</span>
-                    <h2>Repairs, runs, and device activity</h2>
-                  </div>
-                </div>
-                ${
-                  auditEvents.length
-                    ? `<div class="list-grid compact">${auditEvents.map(renderAuditCard).join("")}</div>`
-                    : `<div class="empty-state">No operator events have been recorded yet.</div>`
-                }
-              </article>
+            <section class="content-grid wide">
+              ${renderAccordionPanel(
+                "Recent Chats",
+                "See what Freedom and the phone have been doing",
+                recentSessionActivity.length
+                  ? `<div class="list-grid">${recentSessionActivity.map(renderSessionCard).join("")}</div>`
+                  : `<div class="empty-state">No chat sessions yet. Pair the phone, start a chat, and it will show up here.</div>`
+              )}
+              ${renderAccordionPanel(
+                "Audit Timeline",
+                "Repairs, runs, and device activity",
+                auditEvents.length
+                  ? `<div class="list-grid compact">${auditEvents.map(renderAuditCard).join("")}</div>`
+                  : `<div class="empty-state">No operator events have been recorded yet.</div>`
+              )}
             </section>
           </div>
 
           <div class="tab-panel" data-tab-panel="workspaces" role="tabpanel" aria-labelledby="tab-workspaces" hidden>
-            <section class="content-grid single">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Approved roots</span>
-                    <h2>Desktop workspaces exposed to the phone</h2>
-                  </div>
-                </div>
-                ${
-                  roots.length
-                    ? `<div class="stack gap-sm">${roots
-                        .map(
-                          (root) =>
-                            `<div class="token-row"><code>${escapeHtml(root)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(root)}">Copy</button></div>`
-                        )
-                        .join("")}</div>`
-                    : `<div class="empty-state">No approved roots have been registered yet.</div>`
-                }
-              </article>
+            <section class="content-grid wide">
+              ${renderAccordionPanel(
+                "Overview",
+                "Desktop posture, business state, and system summary",
+                `
+                  <details class="accordion-card" open>
+                    <summary>Current posture</summary>
+                    <div class="accordion-body">
+                      <p>${escapeHtml(partnerPosture)}</p>
+                      <p>${escapeHtml(codexDetail)}</p>
+                    </div>
+                  </details>
+                  <details class="accordion-card" open>
+                    <summary>System metrics</summary>
+                    <div class="accordion-body stack gap-sm">
+                      ${renderWorkbenchSignalCard("Run state", humanizeRunState(hostStatus?.runState ?? "ready"), `${humanizeRepairState(hostStatus?.repairState ?? "healthy")} · ${humanizeAvailability(hostStatus?.availability ?? "needs_attention")}`)}
+                      ${renderWorkbenchSignalCard("Pairing", pairingCode, "Current mobile companion code for reconnect and onboarding.")}
+                      ${renderWorkbenchSignalCard("Companion", hostStatus?.pairedDeviceCount === 1 ? "1 phone" : `${hostStatus?.pairedDeviceCount ?? 0} phones`, "Connected mobile companion devices.")}
+                    </div>
+                  </details>
+                `
+              )}
+              ${renderAccordionPanel(
+                "Workspaces",
+                "Desktop workspaces exposed to the phone",
+                roots.length
+                  ? `<div class="stack gap-sm">${roots
+                      .map(
+                        (root) =>
+                          `<div class="token-row"><code>${escapeHtml(root)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(root)}">Copy</button></div>`
+                      )
+                      .join("")}</div>`
+                  : `<div class="empty-state">No approved roots have been registered yet.</div>`
+              )}
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="projects" role="tabpanel" aria-labelledby="tab-projects" hidden>
+            <section class="content-grid wide">
+              ${renderAccordionPanel(
+                "Active Projects",
+                "Live work that Freedom is already carrying",
+                recentSessionActivity.length
+                  ? `<div class="list-grid">${recentSessionActivity.map(renderSessionCard).join("")}</div>`
+                  : `<div class="empty-state">No active projects yet. Start one from Studio or Build and it will appear here.</div>`
+              )}
+              ${renderAccordionPanel(
+                "Decision Queue",
+                "Approvals, failures, repairs, and pending intervention",
+                attentionEvents.length
+                  ? `<div class="stack gap-sm">${attentionEvents.map(renderAttentionEventCard).join("")}</div>`
+                  : `<div class="empty-state">Nothing urgent is waiting for review.</div>`
+              )}
+            </section>
+          </div>
+
+          <div class="tab-panel" data-tab-panel="build" role="tabpanel" aria-labelledby="tab-build" hidden>
+            <section class="content-grid wide">
+              ${renderAccordionPanel(
+                "Builder",
+                "Tell Freedom what to build next",
+                `
+                  <details class="accordion-card" open>
+                    <summary>Agent build actions</summary>
+                    <div class="accordion-body stack gap-sm">
+                      <button class="button button-primary" type="button" data-tab-open="operator" data-studio-open="desk" data-partner-prompt="Build a new agent for me. Start by asking the minimum clarifying questions, then produce the build brief, architecture, and first implementation plan.">Build New Agent</button>
+                      <button class="button button-secondary" type="button" data-tab-open="operator" data-studio-open="desk" data-partner-prompt="Improve an existing Freedom agent. Review the current capability, identify gaps, and propose the next governed build iteration.">Improve Existing Agent</button>
+                      <button class="button button-secondary" type="button" data-tab-open="operator" data-studio-open="desk" data-partner-prompt="Take an agent idea from concept to build brief. Define scope, interfaces, dependencies, validation, and the first execution steps.">Turn Idea Into Build Brief</button>
+                    </div>
+                  </details>
+                  <details class="accordion-card" open>
+                    <summary>What this build surface is for</summary>
+                    <div class="accordion-body">
+                      <p>Use this area when you want Freedom to design, plan, or execute a new agent build. The action buttons above drop you straight into the Studio command surface with a build-focused prompt.</p>
+                    </div>
+                  </details>
+                `
+              )}
+              ${renderAccordionPanel(
+                "Build Pipeline",
+                "Projects, companion context, and readiness for agent work",
+                `
+                  <details class="accordion-card" open>
+                    <summary>Current project load</summary>
+                    <div class="accordion-body">
+                      ${
+                        recentSessionActivity.length
+                          ? `<div class="list-grid compact">${recentSessionActivity.slice(0, 4).map(renderWorkbenchSessionCard).join("")}</div>`
+                          : `<div class="empty-state">No current project threads yet.</div>`
+                      }
+                    </div>
+                  </details>
+                  <details class="accordion-card" open>
+                    <summary>Connected devices</summary>
+                    <div class="accordion-body">
+                      ${
+                        recentDevices.length
+                          ? `<div class="list-grid compact">${recentDevices
+                              .map(
+                                (device) => `
+                                  <div class="list-card">
+                                    <strong>${escapeHtml(device.deviceName)}</strong>
+                                    <p>Last seen ${escapeHtml(timeAgo(device.lastSeenAt))}</p>
+                                    <p>Repair count ${device.repairCount} · ${device.pushToken ? "Push ready" : "Push not set"}</p>
+                                    <span class="micro">${escapeHtml(device.id)}</span>
+                                  </div>
+                                `
+                              )
+                              .join("")}</div>`
+                          : `<div class="empty-state">No phone has paired yet.</div>`
+                      }
+                    </div>
+                  </details>
+                `
+              )}
+              ${renderAccordionPanel(
+                "Build Notes",
+                "Governed delivery reminders",
+                `
+                  <details class="accordion-card" open>
+                    <summary>Current posture</summary>
+                    <div class="accordion-body stack gap-sm">
+                      ${renderWorkbenchSignalCard("Desktop readiness", codexState, codexDetail)}
+                      ${renderWorkbenchSignalCard("Transport", hostStatus?.tailscale.connected ? "Ready" : "Needs attention", tailscaleDetail)}
+                      ${renderWorkbenchSignalCard("Approved roots", `${roots.length}`, roots.length ? "Freedom has approved workspace context available for builds." : "Add approved roots so Freedom can execute against the right project folders.")}
+                    </div>
+                  </details>
+                `
+              )}
             </section>
           </div>
 
           <div class="tab-panel" data-tab-panel="devices" role="tabpanel" aria-labelledby="tab-devices" hidden>
             <section class="content-grid single">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Trusted phones</span>
-                    <h2>Recent paired devices</h2>
-                  </div>
-                </div>
-                ${
-                  recentDevices.length
-                    ? `<div class="list-grid compact">${recentDevices
+              ${renderAccordionPanel(
+                "Trusted devices",
+                "Recent paired phones and sync state",
+                recentDevices.length
+                  ? `<div class="list-grid compact">${recentDevices
                         .map(
                           (device) => `
                             <div class="list-card">
                               <strong>${escapeHtml(device.deviceName)}</strong>
                               <p>Last seen ${escapeHtml(timeAgo(device.lastSeenAt))}</p>
-                              <p>Repair count ${device.repairCount} · ${device.pushToken ? "Push ready" : "Push not set"}</p>
-                              <span class="micro">${escapeHtml(device.id)}</span>
-                            </div>
-                          `
+                            <p>Repair count ${device.repairCount} · ${device.pushToken ? "Push ready" : "Push not set"}</p>
+                            <span class="micro">${escapeHtml(device.id)}</span>
+                          </div>
+                        `
                         )
                         .join("")}</div>`
-                    : `<div class="empty-state">No phone has paired yet.</div>`
-                }
-              </article>
+                  : `<div class="empty-state">No phone has paired yet.</div>`
+              )}
             </section>
           </div>
 
           <div class="tab-panel" data-tab-panel="settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
             <section class="content-grid wide">
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Desktop Settings</span>
-                    <h2>Health, transport, and launch behavior</h2>
+              ${renderAccordionPanel(
+                "Desktop settings",
+                "Health, transport, and launch behavior",
+                `
+                  <details class="accordion-card" open>
+                    <summary>Freedom auth</summary>
+                    <div class="accordion-body">
+                      <p>${escapeHtml(codexDetail)}</p>
+                    </div>
+                  </details>
+                  <details class="accordion-card" open>
+                    <summary>Transport</summary>
+                    <div class="accordion-body">
+                      <p>${escapeHtml(tailscaleDetail)}</p>
+                      <p>Transport security: ${escapeHtml(hostStatus?.tailscale.transportSecurity ?? "unknown")}</p>
+                    </div>
+                  </details>
+                `
+              )}
+              ${renderAccordionPanel(
+                "Support surfaces",
+                "Fallback links and packaging",
+                `
+                  <div class="stack gap-sm">
+                    <div class="token-row"><code>${escapeHtml(dashboardUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(dashboardUrl)}">Copy Shell URL</button></div>
+                    <div class="token-row"><code>${escapeHtml(installUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(installUrl)}">Copy Install Page</button></div>
+                    ${
+                      apkDownloadUrl
+                        ? `<div class="token-row"><code>${escapeHtml(apkDownloadUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(apkDownloadUrl)}">Copy APK</button></div>`
+                        : `<div class="empty-state">Android APK not built yet.</div>`
+                    }
                   </div>
-                </div>
-                <div class="stack gap-md">
-                  <div class="status-card">
-                    <strong>${escapeHtml(codexState)}</strong>
-                    <p>${escapeHtml(codexDetail)}</p>
-                  </div>
-                  <div class="status-card">
-                    <strong>${escapeHtml(tailscaleState)}</strong>
-                    <p>${escapeHtml(tailscaleDetail)}</p>
-                  </div>
-                  <div class="status-card">
-                    <strong>Transport security: ${escapeHtml(hostStatus?.tailscale.transportSecurity ?? "unknown")}</strong>
-                    <p>Adam Connect is tailnet-first. If secure transport is unavailable, treat this machine as needing attention until transport is upgraded.</p>
-                  </div>
-                </div>
-              </article>
-
-              <article class="panel section">
-                <div class="section-head">
-                  <div>
-                    <span class="label">Support Surfaces</span>
-                    <h2>Fallback links and packaging</h2>
-                  </div>
-                </div>
-                <div class="stack gap-sm">
-                  <div class="token-row"><code>${escapeHtml(dashboardUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(dashboardUrl)}">Copy Shell URL</button></div>
-                  <div class="token-row"><code>${escapeHtml(installUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(installUrl)}">Copy Install Page</button></div>
-                  ${
-                    apkDownloadUrl
-                      ? `<div class="token-row"><code>${escapeHtml(apkDownloadUrl)}</code><button class="icon-button" type="button" data-copy="${escapeAttribute(apkDownloadUrl)}">Copy APK</button></div>`
-                      : `<div class="empty-state">Android APK not built yet.</div>`
-                  }
-                </div>
-              </article>
+                `
+              )}
             </section>
           </div>
         </section>
@@ -423,14 +606,14 @@ export function renderInstallPage(model: InstallPageModel): string {
   const authLabel = humanizeAuth(hostStatus?.auth.status ?? "logged_out");
 
   return renderPage({
-    title: "Install Adam Connect",
-    description: "Phone setup page for Adam Connect over Tailscale.",
+    title: "Install Freedom",
+    description: "Phone setup page for Freedom over Tailscale.",
     body: `
       <main class="shell narrow">
         <section class="hero panel compact-hero">
           <div class="hero-copy">
             <span class="eyebrow">Phone setup</span>
-            <h1>Install Adam Connect on your phone.</h1>
+            <h1>Install Freedom on your phone.</h1>
             <p class="lede">
               This page is designed to be easy to open from a phone. Download the Android APK, then pair the app to
               your desktop using the same URL and pairing code shown below.
@@ -438,7 +621,7 @@ export function renderInstallPage(model: InstallPageModel): string {
             <div class="button-row">
               ${
                 apkDownloadUrl
-                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="adam-connect.apk">Download Android APK</a>`
+                  ? `<a class="button button-primary" href="${escapeHtml(apkDownloadUrl)}" download="freedom.apk">Download Android APK</a>`
                   : `<span class="button button-muted">Android APK not available yet</span>`
               }
               <a class="button button-secondary" href="${escapeHtml(publicBaseUrl)}">Back to Desktop Dashboard</a>
@@ -454,7 +637,7 @@ export function renderInstallPage(model: InstallPageModel): string {
               <code>${escapeHtml(suggestedUrl)}</code>
               <button class="icon-button" type="button" data-copy="${escapeAttribute(suggestedUrl)}">Copy</button>
             </div>
-            <p class="muted">Paste this into the Adam Connect app after installation.</p>
+            <p class="muted">Paste this into the Freedom companion app after installation.</p>
           </article>
 
           <article class="panel section">
@@ -486,10 +669,10 @@ export function renderInstallPage(model: InstallPageModel): string {
             <span class="label">Step 4</span>
             <h2>Start chatting</h2>
             <ol class="steps">
-              <li>Open the Adam Connect app on Android.</li>
+              <li>Open the Freedom app on Android.</li>
               <li>Enter the desktop URL and pairing code from this page. The QR code is optional convenience only.</li>
-              <li>Let the default <code>Operator</code> chat restore first, or create a named project chat when you need a separate thread.</li>
-              <li>Send a text prompt or use <code>Talk To Codex</code>.</li>
+              <li>Let the default <code>${escapeHtml(FREEDOM_PRIMARY_SESSION_TITLE)}</code> chat restore first, or create a named project chat when you need a separate thread.</li>
+              <li>Send a text prompt or use voice to talk to Freedom.</li>
             </ol>
             <p class="muted">Keep this URL handy for remote recovery. You only need the code again if you set up a new phone or reinstall the app.</p>
           </article>
@@ -547,23 +730,25 @@ function renderPage(input: { title: string; description: string; body: string })
     <meta name="description" content="${escapeAttribute(input.description)}" />
     <style>
       :root {
-        --navy-950: #11243e;
-        --navy-800: #1b365d;
-        --navy-600: #2b5b8c;
-        --cream: #fdf8ef;
-        --cream-strong: #f6efe1;
-        --panel: rgba(255, 255, 255, 0.82);
-        --line: rgba(17, 36, 62, 0.12);
-        --text: #17304f;
-        --muted: #52657f;
-        --teal: #0f766e;
-        --teal-soft: #d8fbf3;
-        --orange: #d96b1c;
-        --orange-soft: #ffedd8;
-        --shadow: 0 20px 48px rgba(17, 36, 62, 0.14);
-        --radius-xl: 30px;
-        --radius-lg: 22px;
-        --radius-md: 16px;
+        --navy-950: #081224;
+        --navy-900: #0d1b31;
+        --navy-800: #132744;
+        --navy-700: #1e416d;
+        --navy-600: #2f6ea8;
+        --panel: rgba(245, 249, 255, 0.88);
+        --panel-strong: rgba(255, 255, 255, 0.94);
+        --line: rgba(19, 39, 68, 0.12);
+        --line-strong: rgba(89, 143, 204, 0.24);
+        --text: #12233b;
+        --muted: #556883;
+        --teal: #1f8fa3;
+        --teal-soft: rgba(72, 176, 214, 0.16);
+        --orange: #5e89bb;
+        --orange-soft: rgba(87, 130, 186, 0.16);
+        --shadow: 0 18px 44px rgba(7, 21, 44, 0.14);
+        --radius-xl: 14px;
+        --radius-lg: 10px;
+        --radius-md: 8px;
       }
 
       * {
@@ -573,11 +758,11 @@ function renderPage(input: { title: string; description: string; body: string })
       body {
         margin: 0;
         color: var(--text);
-        font-family: "Inter", "Segoe UI", sans-serif;
+        font-family: Calibri, "Segoe UI", sans-serif;
         background:
-          radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 28%),
-          radial-gradient(circle at top right, rgba(217, 107, 28, 0.16), transparent 24%),
-          linear-gradient(180deg, #fffdf8 0%, #f1ebdf 100%);
+          radial-gradient(circle at top left, rgba(64, 130, 210, 0.18), transparent 28%),
+          radial-gradient(circle at top right, rgba(91, 181, 214, 0.14), transparent 24%),
+          linear-gradient(180deg, #f7fbff 0%, #e6eef8 100%);
       }
 
       a {
@@ -596,6 +781,14 @@ function renderPage(input: { title: string; description: string; body: string })
         padding: 20px 16px 38px;
       }
 
+      .shell-app {
+        max-width: 1440px;
+      }
+
+      .shell-studio {
+        max-width: 1520px;
+      }
+
       .shell.narrow {
         max-width: 900px;
       }
@@ -606,6 +799,77 @@ function renderPage(input: { title: string; description: string; body: string })
         border-radius: var(--radius-xl);
         box-shadow: var(--shadow);
         backdrop-filter: blur(18px);
+      }
+
+      .studio-topbar {
+        display: grid;
+        grid-template-columns: auto minmax(320px, 1fr) auto;
+        gap: 14px;
+        align-items: center;
+        padding: 12px 16px;
+      }
+
+      .studio-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--navy-800), #51a8d0);
+        color: #f8fbff;
+        font-weight: 700;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+      }
+
+      .brand-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+      .brand-copy strong {
+        font-size: 1rem;
+      }
+
+      .brand-copy span {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .studio-search {
+        display: grid;
+        gap: 6px;
+      }
+
+      .studio-search span {
+        color: var(--muted);
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .studio-search input {
+        width: 100%;
+        min-height: 40px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(231, 239, 249, 0.92));
+        color: var(--text);
+        padding: 0 14px;
+        font: inherit;
+      }
+
+      .studio-top-status {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
       }
 
       .hero {
@@ -623,7 +887,7 @@ function renderPage(input: { title: string; description: string; body: string })
         inset: auto -40px -80px auto;
         width: 260px;
         height: 260px;
-        border-radius: 40px;
+        border-radius: 20px;
         background: linear-gradient(145deg, rgba(17, 36, 62, 0.14), rgba(15, 118, 110, 0.08));
         transform: rotate(18deg);
       }
@@ -650,7 +914,7 @@ function renderPage(input: { title: string; description: string; body: string })
         align-items: center;
         min-height: 26px;
         padding: 0 10px;
-        border-radius: 999px;
+        border-radius: 6px;
         background: rgba(15, 118, 110, 0.12);
         color: var(--teal);
         font-size: 0.72rem;
@@ -710,7 +974,7 @@ function renderPage(input: { title: string; description: string; body: string })
         justify-content: center;
         min-height: 42px;
         padding: 0 16px;
-        border-radius: 999px;
+        border-radius: 8px;
         font-weight: 700;
         text-decoration: none;
         font-size: 0.92rem;
@@ -724,16 +988,16 @@ function renderPage(input: { title: string; description: string; body: string })
 
       .button-primary {
         color: #fff;
-        background: linear-gradient(135deg, var(--navy-950), var(--navy-800));
+        background: linear-gradient(135deg, var(--navy-900), var(--navy-600));
       }
 
       .button-secondary {
         color: var(--navy-800);
-        background: #e5eef9;
+        background: linear-gradient(180deg, #eaf1fb, #dbe7f5);
       }
 
       .button-ghost {
-        color: var(--orange);
+        color: var(--navy-700);
         background: var(--orange-soft);
       }
 
@@ -748,7 +1012,7 @@ function renderPage(input: { title: string; description: string; body: string })
         align-items: center;
         min-height: 32px;
         padding: 0 12px;
-        border-radius: 999px;
+        border-radius: 8px;
         font-weight: 700;
         font-size: 0.86rem;
       }
@@ -808,7 +1072,7 @@ function renderPage(input: { title: string; description: string; body: string })
 
       .icon-button {
         border: 0;
-        border-radius: 999px;
+        border-radius: 8px;
         min-height: 34px;
         padding: 0 12px;
         background: rgba(17, 36, 62, 0.1);
@@ -858,6 +1122,297 @@ function renderPage(input: { title: string; description: string; body: string })
         flex: 1 1 360px;
       }
 
+      .app-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) auto;
+        gap: 18px;
+        align-items: end;
+        padding: 22px 24px;
+      }
+
+      .app-header-copy h1 {
+        max-width: 15ch;
+      }
+
+      .app-header-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      .command-ribbon {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .ribbon-card {
+        display: grid;
+        gap: 10px;
+        padding: 16px 18px;
+      }
+
+      .ribbon-card-wide {
+        grid-column: span 2;
+      }
+
+      .ribbon-value {
+        font-size: 1.8rem;
+        line-height: 1;
+        letter-spacing: 0.08em;
+        color: var(--navy-950);
+      }
+
+      .ribbon-code {
+        font-size: 1rem;
+        color: var(--navy-950);
+      }
+
+      .ribbon-card p {
+        margin: 0;
+      }
+
+      .studio-workspace {
+        display: grid;
+        grid-template-columns: 72px minmax(260px, 0.85fr) minmax(0, 1.8fr) minmax(280px, 0.95fr);
+        gap: 12px;
+        align-items: start;
+      }
+
+      .studio-rail,
+      .studio-sidebar,
+      .studio-main,
+      .studio-inspector {
+        min-height: calc(100vh - 220px);
+      }
+
+      .studio-rail {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+        padding: 10px;
+      }
+
+      .studio-rail-button {
+        min-height: 52px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .studio-rail-button.active {
+        color: #f8fbff;
+        background: linear-gradient(135deg, var(--navy-800), var(--navy-600));
+      }
+
+      .studio-sidebar,
+      .studio-inspector {
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .accordion-card {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--panel-strong);
+        overflow: hidden;
+      }
+
+      .accordion-card summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 14px 16px;
+        font-weight: 700;
+        color: var(--navy-900);
+      }
+
+      .accordion-card summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .accordion-body {
+        padding: 0 16px 16px;
+      }
+
+      .studio-main {
+        padding: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top right, rgba(79, 184, 227, 0.22), transparent 28%),
+          linear-gradient(180deg, rgba(13, 27, 49, 0.98), rgba(18, 35, 59, 0.98));
+        border-color: rgba(98, 170, 224, 0.18);
+      }
+
+      .editor-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(134, 173, 219, 0.14);
+        background: rgba(4, 11, 24, 0.3);
+      }
+
+      .editor-tab {
+        min-height: 38px;
+        border-radius: 6px 6px 0 0;
+        border: 1px solid transparent;
+        background: rgba(118, 148, 191, 0.12);
+        color: rgba(230, 240, 255, 0.72);
+        padding: 0 14px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .editor-tab.active {
+        background: rgba(15, 33, 58, 0.88);
+        color: #eff7ff;
+        border-color: rgba(128, 193, 233, 0.2);
+      }
+
+      .studio-panel {
+        display: grid;
+        gap: 16px;
+        padding: 16px;
+      }
+
+      .studio-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .glow-card {
+        padding: 16px;
+        border-radius: 10px;
+        border: 1px solid rgba(123, 180, 224, 0.16);
+        background: linear-gradient(180deg, rgba(18, 35, 59, 0.82), rgba(12, 24, 41, 0.92));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03), 0 0 28px rgba(47, 124, 198, 0.12);
+      }
+
+      .glow-card strong {
+        display: block;
+        margin-top: 10px;
+        color: #f0f7ff;
+        font-size: 1.2rem;
+      }
+
+      .glow-card p,
+      .glow-label {
+        color: rgba(216, 230, 247, 0.74);
+      }
+
+      .glow-label {
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .glow-card-large {
+        min-height: 220px;
+      }
+
+      .studio-console-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.95fr);
+        gap: 14px;
+        align-items: start;
+      }
+
+      .studio-grid-two {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+        gap: 14px;
+      }
+
+      .workbench-grid {
+        display: grid;
+        grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.7fr) minmax(280px, 1fr);
+        gap: 14px;
+        margin-top: 14px;
+        align-items: start;
+      }
+
+      .workbench-column,
+      .workbench-main {
+        display: grid;
+        gap: 14px;
+      }
+
+      .workbench-main {
+        min-width: 0;
+      }
+
+      .workbench-command {
+        overflow: hidden;
+        position: relative;
+      }
+
+      .workbench-command::after {
+        content: "";
+        position: absolute;
+        right: -80px;
+        top: -80px;
+        width: 220px;
+        height: 220px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(15, 118, 110, 0.16), transparent 68%);
+        pointer-events: none;
+      }
+
+      .workbench-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .mini-stat,
+      .mini-kpi {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.76);
+        padding: 14px 16px;
+      }
+
+      .mini-stat strong,
+      .mini-kpi strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 1.24rem;
+        color: var(--navy-950);
+      }
+
+      .mini-stat p {
+        margin: 8px 0 0;
+        font-size: 0.9rem;
+      }
+
+      .mini-stat-label,
+      .mini-kpi-label {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .workbench-shortcuts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
       .tab-shell {
         margin-top: 14px;
       }
@@ -866,7 +1421,7 @@ function renderPage(input: { title: string; description: string; body: string })
         display: flex;
         gap: 8px;
         flex-wrap: wrap;
-        padding: 10px;
+        padding: 8px;
       }
 
       .tab-button {
@@ -874,19 +1429,20 @@ function renderPage(input: { title: string; description: string; body: string })
         align-items: center;
         justify-content: center;
         border: 0;
-        border-radius: 999px;
-        min-height: 38px;
+        border-radius: 8px;
+        min-height: 40px;
         padding: 0 14px;
-        background: rgba(17, 36, 62, 0.08);
-        color: var(--navy-800);
+        background: transparent;
+        color: var(--muted);
         cursor: pointer;
         font-weight: 800;
-        font-size: 0.9rem;
+        font-size: 0.94rem;
       }
 
       .tab-button.active {
-        color: #fff;
-        background: linear-gradient(135deg, var(--navy-950), var(--navy-800));
+        color: var(--navy-900);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(225, 235, 248, 0.96));
+        box-shadow: inset 0 0 0 1px var(--line-strong);
       }
 
       .tab-panel {
@@ -921,7 +1477,7 @@ function renderPage(input: { title: string; description: string; body: string })
         place-items: center;
         margin: 14px 0 12px;
         padding: 16px;
-        border-radius: 22px;
+        border-radius: 10px;
         background: rgba(253, 248, 239, 0.95);
         border: 1px solid var(--line);
       }
@@ -991,9 +1547,162 @@ function renderPage(input: { title: string; description: string; body: string })
         margin-top: 12px;
       }
 
+      .partner-console {
+        flex: 1 1 100%;
+      }
+
+      .partner-topline {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.9fr);
+        gap: 12px;
+      }
+
+      .partner-summary-card {
+        min-height: 100%;
+      }
+
+      .partner-mini-metrics {
+        display: grid;
+        gap: 12px;
+      }
+
+      .partner-status-cluster {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+
+      .command-bar-frame {
+        border: 1px solid rgba(17, 36, 62, 0.12);
+        border-radius: 10px;
+        background: rgba(236, 244, 252, 0.96);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+        overflow: hidden;
+      }
+
+      .quick-prompt-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .quick-prompt {
+        border: 1px solid rgba(17, 36, 62, 0.12);
+        border-radius: 8px;
+        min-height: 38px;
+        padding: 0 14px;
+        background: rgba(36, 76, 123, 0.38);
+        color: #e7f1ff;
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 0.88rem;
+      }
+
+      .partner-transcript {
+        display: grid;
+        gap: 12px;
+        max-height: 560px;
+        min-height: 420px;
+        padding-right: 4px;
+        overflow: auto;
+      }
+
+      .partner-bubble {
+        padding: 14px 16px;
+        border-radius: 10px;
+        border: 1px solid rgba(126, 173, 219, 0.16);
+        background: rgba(15, 27, 44, 0.84);
+      }
+
+      .partner-bubble.user {
+        background: rgba(30, 54, 82, 0.88);
+      }
+
+      .partner-bubble.assistant {
+        background: rgba(14, 40, 70, 0.88);
+      }
+
+      .partner-bubble.system {
+        background: rgba(26, 46, 73, 0.88);
+      }
+
+      .partner-bubble-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+
+      .partner-bubble-label {
+        color: rgba(194, 222, 255, 0.88);
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .partner-bubble-time {
+        color: rgba(194, 212, 237, 0.56);
+        font-size: 0.76rem;
+      }
+
+      .partner-bubble-body {
+        margin: 0;
+        color: #ecf4ff;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+
+      .partner-composer {
+        display: grid;
+        gap: 10px;
+      }
+
+      .composer-label {
+        font-weight: 700;
+      }
+
+      .partner-composer textarea {
+        width: 100%;
+        border: 0;
+        padding: 14px 16px;
+        font: inherit;
+        color: var(--text);
+        background: transparent;
+        resize: vertical;
+      }
+
+      .partner-composer textarea:focus {
+        outline: none;
+      }
+
+      .command-bar-help {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-top: 1px solid rgba(17, 36, 62, 0.08);
+        padding: 10px 16px 12px;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .keyboard-hint {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 8px;
+        background: rgba(17, 36, 62, 0.08);
+        color: var(--navy-800);
+        font-weight: 700;
+      }
+
       .message-preview {
         padding: 10px 12px;
-        border-radius: 14px;
+        border-radius: 8px;
         border: 1px solid var(--line);
         background: rgba(255, 255, 255, 0.78);
       }
@@ -1029,7 +1738,7 @@ function renderPage(input: { title: string; description: string; body: string })
       .error-note {
         margin-top: 10px;
         padding: 9px 10px;
-        border-radius: 14px;
+        border-radius: 8px;
         background: rgba(217, 107, 28, 0.12);
         color: var(--orange);
         font-weight: 700;
@@ -1049,6 +1758,47 @@ function renderPage(input: { title: string; description: string; body: string })
         align-items: center;
         justify-content: space-between;
         gap: 14px;
+      }
+
+      .compact-thread-card,
+      .attention-card,
+      .workspace-card {
+        padding: 14px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: rgba(247, 250, 255, 0.92);
+      }
+
+      .compact-thread-card strong,
+      .attention-card strong,
+      .workspace-card strong {
+        display: block;
+      }
+
+      .compact-thread-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .compact-thread-preview,
+      .attention-copy,
+      .workspace-copy {
+        margin: 8px 0 0;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 0.9rem;
+      }
+
+      .workspace-card code {
+        display: block;
+        margin-top: 10px;
+      }
+
+      .emphasis-card {
+        background: linear-gradient(145deg, rgba(17, 36, 62, 0.08), rgba(15, 118, 110, 0.08));
       }
 
       .steps {
@@ -1076,7 +1826,7 @@ function renderPage(input: { title: string; description: string; body: string })
         right: 18px;
         bottom: 18px;
         padding: 12px 14px;
-        border-radius: 14px;
+        border-radius: 8px;
         background: rgba(17, 36, 62, 0.9);
         color: #fff;
         font-weight: 700;
@@ -1092,6 +1842,25 @@ function renderPage(input: { title: string; description: string; body: string })
       }
 
       @media (max-width: 940px) {
+        .studio-topbar,
+        .studio-workspace,
+        .studio-console-shell,
+        .studio-grid-two,
+        .studio-stats-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .studio-rail,
+        .studio-sidebar,
+        .studio-main,
+        .studio-inspector {
+          min-height: auto;
+        }
+
+        .studio-top-status {
+          justify-content: flex-start;
+        }
+
         .hero {
           grid-template-columns: 1fr;
         }
@@ -1099,11 +1868,31 @@ function renderPage(input: { title: string; description: string; body: string })
         h1 {
           max-width: none;
         }
+
+        .app-header,
+        .command-ribbon,
+        .workbench-grid,
+        .partner-topline,
+        .workbench-stat-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .app-header-actions {
+          justify-content: flex-start;
+        }
+
+        .ribbon-card-wide {
+          grid-column: span 1;
+        }
       }
 
       @media (max-width: 640px) {
         .shell {
           padding: 18px 12px 36px;
+        }
+
+        .studio-topbar {
+          grid-template-columns: 1fr;
         }
 
         .hero,
@@ -1115,7 +1904,8 @@ function renderPage(input: { title: string; description: string; body: string })
         .token-row,
         .section-head,
         .status-line,
-        .inline-qr-card {
+        .inline-qr-card,
+        .command-bar-help {
           align-items: flex-start;
           flex-direction: column;
         }
@@ -1143,7 +1933,8 @@ function renderPage(input: { title: string; description: string; body: string })
       let toastTimer;
       const tabs = Array.from(document.querySelectorAll("[data-tab-target]"));
       const panels = Array.from(document.querySelectorAll("[data-tab-panel]"));
-      const storageKey = "adam-connect-desktop-tab";
+      const studioRailButtons = Array.from(document.querySelectorAll(".studio-rail-button"));
+      const storageKey = "freedom-desktop-tab";
       const showToast = (message) => {
         if (!toast) return;
         toast.textContent = message;
@@ -1151,6 +1942,13 @@ function renderPage(input: { title: string; description: string; body: string })
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => toast.classList.remove("visible"), 1800);
       };
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       const activateTab = (tabId) => {
         const targetId = tabs.some((button) => button.getAttribute("data-tab-target") === tabId)
           ? tabId
@@ -1170,6 +1968,7 @@ function renderPage(input: { title: string; description: string; body: string })
         try {
           localStorage.setItem(storageKey, targetId);
         } catch {}
+        syncStudioRail();
       };
       tabs.forEach((button) => {
         button.addEventListener("click", () => activateTab(button.getAttribute("data-tab-target")));
@@ -1180,6 +1979,10 @@ function renderPage(input: { title: string; description: string; body: string })
           const targetId = link.getAttribute("data-tab-open");
           if (!targetId) return;
           activateTab(targetId);
+          const studioTarget = link.getAttribute("data-studio-open");
+          if (studioTarget) {
+            activateStudioTab(studioTarget);
+          }
           window.location.hash = targetId;
         });
       });
@@ -1198,6 +2001,50 @@ function renderPage(input: { title: string; description: string; body: string })
             return "operator";
           }
         })();
+      const studioTabs = Array.from(document.querySelectorAll("[data-studio-tab-target]"));
+      const studioPanels = Array.from(document.querySelectorAll("[data-studio-panel]"));
+      const syncStudioRail = () => {
+        const activeTopTab = tabs.find((button) => button.classList.contains("active"))?.getAttribute("data-tab-target");
+        const activeStudioTab = studioTabs.find((button) => button.classList.contains("active"))?.getAttribute("data-studio-tab-target");
+        studioRailButtons.forEach((button) => {
+          const topTarget = button.getAttribute("data-tab-open");
+          const studioTarget = button.getAttribute("data-studio-open");
+          const active =
+            topTarget === activeTopTab &&
+            (!studioTarget || studioTarget === activeStudioTab || activeTopTab !== "operator");
+          button.classList.toggle("active", Boolean(active));
+        });
+      };
+      const activateStudioTab = (tabId) => {
+        const targetId = studioTabs.some((button) => button.getAttribute("data-studio-tab-target") === tabId)
+          ? tabId
+          : studioTabs[0]?.getAttribute("data-studio-tab-target");
+        if (!targetId) return;
+        studioTabs.forEach((button) => {
+          const active = button.getAttribute("data-studio-tab-target") === targetId;
+          button.classList.toggle("active", active);
+        });
+        studioPanels.forEach((panel) => {
+          const active = panel.getAttribute("data-studio-panel") === targetId;
+          panel.classList.toggle("active", active);
+          panel.toggleAttribute("hidden", !active);
+        });
+        syncStudioRail();
+      };
+      studioTabs.forEach((button) => {
+        button.addEventListener("click", () => activateStudioTab(button.getAttribute("data-studio-tab-target")));
+      });
+      studioRailButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const studioTarget = button.getAttribute("data-studio-open");
+          if (studioTarget) {
+            activateStudioTab(studioTarget);
+          } else {
+            syncStudioRail();
+          }
+        });
+      });
+      activateStudioTab("desk");
       activateTab(initialTab);
       document.querySelectorAll("[data-copy]").forEach((button) => {
         button.addEventListener("click", async () => {
@@ -1210,6 +2057,281 @@ function renderPage(input: { title: string; description: string; body: string })
           }
         });
       });
+
+      const desktopConsole = document.querySelector("[data-desktop-console]");
+      if (desktopConsole) {
+        const stateUrl = desktopConsole.getAttribute("data-state-url");
+        const sessionUrl = desktopConsole.getAttribute("data-session-url");
+        const sessionBase = desktopConsole.getAttribute("data-session-base");
+        const sessionTitle = document.getElementById("partner-session-title");
+        const sessionMeta = document.getElementById("partner-session-meta");
+        const sessionStatusPill = document.getElementById("partner-status-pill");
+        const sessionLastActivity = document.getElementById("partner-last-activity");
+        const sessionMessageCount = document.getElementById("partner-message-count");
+        const sessionFocusSummary = document.getElementById("partner-focus-summary");
+        const messageList = document.getElementById("partner-messages");
+        const composer = document.getElementById("partner-composer");
+        const input = document.getElementById("partner-input");
+        const sendButton = document.getElementById("partner-send");
+        const stopButton = document.getElementById("partner-stop");
+        const promptButtons = Array.from(document.querySelectorAll("[data-partner-prompt]"));
+        let currentSessionId = null;
+        let currentSessionStatus = "idle";
+        let refreshTimer;
+        let requestActive = false;
+
+        const readErrorMessage = async (response) => {
+          try {
+            const payload = await response.json();
+            return payload?.error || "Freedom could not complete that request.";
+          } catch {
+            return "Freedom could not complete that request.";
+          }
+        };
+
+        const humanizeSessionStatus = (value) =>
+          ({
+            idle: "Ready for the next move",
+            queued: "Queued for execution",
+            running: "Working now",
+            stopping: "Stopping the run",
+            error: "Needs attention"
+          })[value] || "Ready";
+
+        const formatMessageTime = (iso) => {
+          if (!iso) return "";
+          const date = new Date(iso);
+          if (Number.isNaN(date.getTime())) return "";
+          return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        };
+
+        const relativeTime = (iso) => {
+          if (!iso) return "Just now";
+          const date = new Date(iso);
+          if (Number.isNaN(date.getTime())) return "Just now";
+          const deltaSeconds = Math.max(1, Math.round((Date.now() - date.getTime()) / 1000));
+          if (deltaSeconds < 60) return deltaSeconds + "s ago";
+          const deltaMinutes = Math.round(deltaSeconds / 60);
+          if (deltaMinutes < 60) return deltaMinutes + "m ago";
+          const deltaHours = Math.round(deltaMinutes / 60);
+          if (deltaHours < 24) return deltaHours + "h ago";
+          const deltaDays = Math.round(deltaHours / 24);
+          return deltaDays + "d ago";
+        };
+
+        const pillClassForStatus = (status) =>
+          ({
+            running: "pill-teal",
+            queued: "pill-orange",
+            stopping: "pill-orange",
+            error: "pill-orange",
+            idle: "pill-navy"
+          })[status] || "pill-navy";
+
+        const updateComposerState = () => {
+          const hasSession = Boolean(currentSessionId);
+          const busy = ["queued", "running", "stopping"].includes(currentSessionStatus);
+          if (sendButton) {
+            sendButton.disabled = !input || !input.value.trim() || busy;
+          }
+          if (stopButton) {
+            stopButton.disabled = !hasSession || !busy;
+          }
+          if (input) {
+            input.placeholder = busy
+              ? "Freedom is working on the current turn."
+              : "Ask for priorities, a plan, a draft, a hard call, or the next concrete move.";
+          }
+        };
+
+        const renderMessages = (messages) => {
+          if (!messageList) return;
+          if (!messages?.length) {
+            messageList.innerHTML = '<div class="empty-state">The partner desk is ready. Ask Freedom to brief you, challenge a plan, or drive the next move.</div>';
+            return;
+          }
+          messageList.innerHTML = messages
+            .map((message) => {
+              const roleLabel =
+                message.role === "assistant" ? "Freedom" : message.role === "user" ? "You" : "System";
+              const errorMarkup = message.errorMessage
+                ? '<div class="error-note">' + escapeHtml(message.errorMessage) + "</div>"
+                : "";
+              return (
+                '<div class="partner-bubble ' +
+                escapeHtml(message.role) +
+                '">' +
+                '<div class="partner-bubble-header">' +
+                '<span class="partner-bubble-label">' +
+                escapeHtml(roleLabel) +
+                "</span>" +
+                '<span class="partner-bubble-time">' +
+                escapeHtml(formatMessageTime(message.updatedAt || message.createdAt)) +
+                "</span>" +
+                "</div>" +
+                '<p class="partner-bubble-body">' +
+                escapeHtml(message.content || "") +
+                "</p>" +
+                errorMarkup +
+                "</div>"
+              );
+            })
+            .join("");
+          messageList.scrollTop = messageList.scrollHeight;
+        };
+
+        const renderState = (payload) => {
+          const session = payload?.desktopSession || null;
+          const messages = payload?.desktopMessages || [];
+          const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant");
+          const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
+          currentSessionId = session?.id || null;
+          currentSessionStatus = session?.status || "idle";
+          if (sessionTitle) {
+            sessionTitle.textContent = session?.title || ${JSON.stringify(FREEDOM_PRIMARY_SESSION_TITLE)};
+          }
+          if (sessionMeta) {
+            sessionMeta.textContent = session
+              ? humanizeSessionStatus(session.status) + " • " + session.rootPath
+              : "Open the partner desk on this desktop to start a working session with Freedom.";
+          }
+          if (sessionStatusPill) {
+            sessionStatusPill.textContent = session ? humanizeSessionStatus(session.status) : "Preparing";
+            sessionStatusPill.className = "pill " + pillClassForStatus(session?.status || "idle");
+          }
+          if (sessionLastActivity) {
+            sessionLastActivity.textContent = session?.updatedAt ? "Updated " + relativeTime(session.updatedAt) : "Opening the local partner desk.";
+          }
+          if (sessionMessageCount) {
+            sessionMessageCount.textContent = String(messages.length);
+          }
+          if (sessionFocusSummary) {
+            const focusText =
+              latestAssistantMessage?.content?.trim() ||
+              latestUserMessage?.content?.trim() ||
+              "Waiting for the first move";
+            sessionFocusSummary.textContent = focusText.length > 42 ? focusText.slice(0, 41).trimEnd() + "…" : focusText;
+          }
+          renderMessages(messages);
+          updateComposerState();
+        };
+
+        const ensureSession = async () => {
+          if (!sessionUrl) {
+            throw new Error("Partner desk is not configured.");
+          }
+          const response = await fetch(sessionUrl, { method: "POST" });
+          if (!response.ok) {
+            throw new Error(await readErrorMessage(response));
+          }
+          return response.json();
+        };
+
+        const refreshState = async (createIfMissing = false) => {
+          if (!stateUrl || requestActive) return;
+          requestActive = true;
+          try {
+            let response = await fetch(stateUrl, { headers: { accept: "application/json" } });
+            if (!response.ok) {
+              throw new Error(await readErrorMessage(response));
+            }
+            let payload = await response.json();
+            if (createIfMissing && !payload?.desktopSession) {
+              await ensureSession();
+              response = await fetch(stateUrl, { headers: { accept: "application/json" } });
+              if (!response.ok) {
+                throw new Error(await readErrorMessage(response));
+              }
+              payload = await response.json();
+            }
+            renderState(payload);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Freedom needs attention on this desktop.";
+            if (sessionMeta) {
+              sessionMeta.textContent = message;
+            }
+            if (messageList) {
+              messageList.innerHTML = '<div class="empty-state">' + escapeHtml(message) + "</div>";
+            }
+          } finally {
+            requestActive = false;
+          }
+        };
+
+        composer?.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (!input || !sessionBase) return;
+          const text = input.value.trim();
+          if (!text) return;
+          try {
+            if (!currentSessionId) {
+              const session = await ensureSession();
+              currentSessionId = session.id;
+            }
+            const response = await fetch(sessionBase + "/" + encodeURIComponent(currentSessionId) + "/messages", {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                accept: "application/json"
+              },
+              body: JSON.stringify({
+                text,
+                inputMode: "text",
+                responseStyle: "executive"
+              })
+            });
+            if (!response.ok) {
+              throw new Error(await readErrorMessage(response));
+            }
+            input.value = "";
+            updateComposerState();
+            showToast("Sent to Freedom");
+            await refreshState();
+          } catch (error) {
+            showToast(error instanceof Error ? error.message : "Send failed");
+          }
+        });
+
+        stopButton?.addEventListener("click", async () => {
+          if (!currentSessionId || !sessionBase) return;
+          try {
+            const response = await fetch(sessionBase + "/" + encodeURIComponent(currentSessionId) + "/stop", {
+              method: "POST",
+              headers: { accept: "application/json" }
+            });
+            if (!response.ok) {
+              throw new Error(await readErrorMessage(response));
+            }
+            showToast("Stop requested");
+            await refreshState();
+          } catch (error) {
+            showToast(error instanceof Error ? error.message : "Stop failed");
+          }
+        });
+
+        input?.addEventListener("input", () => updateComposerState());
+        window.addEventListener("keydown", (event) => {
+          if (!input) return;
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            input.focus();
+          }
+        });
+        promptButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            if (!input) return;
+            input.value = button.getAttribute("data-partner-prompt") || "";
+            input.focus();
+            updateComposerState();
+          });
+        });
+
+        void refreshState(true);
+        refreshTimer = setInterval(() => {
+          void refreshState(false);
+        }, 4000);
+        window.addEventListener("beforeunload", () => clearInterval(refreshTimer));
+      }
     </script>
   </body>
 </html>`;
@@ -1231,14 +2353,81 @@ function renderDesktopTabButton(id: string, label: string, active = false): stri
   `;
 }
 
+function renderAccordionPanel(label: string, title: string, body: string): string {
+  return `
+    <article class="panel section">
+      <div class="section-head">
+        <div>
+          <span class="label">${escapeHtml(label)}</span>
+          <h2>${escapeHtml(title)}</h2>
+        </div>
+      </div>
+      <div class="stack gap-md">
+        ${body}
+      </div>
+    </article>
+  `;
+}
+
+function renderWorkbenchSignalCard(title: string, value: string, detail: string): string {
+  return `
+    <div class="status-card">
+      <strong>${escapeHtml(title)}</strong>
+      <div class="compact-thread-meta">
+        <span class="pill pill-navy">${escapeHtml(value)}</span>
+      </div>
+      <p>${escapeHtml(detail)}</p>
+    </div>
+  `;
+}
+
+function renderWorkbenchSessionCard(activity: RecentSessionActivity): string {
+  const preview =
+    activity.latestAssistantMessage?.content?.trim() ||
+    activity.latestUserMessage?.content?.trim() ||
+    activity.session.lastPreview ||
+    "No recent transcript yet.";
+  return `
+    <div class="compact-thread-card">
+      <strong>${escapeHtml(activity.session.title)}</strong>
+      <div class="compact-thread-meta">
+        <span class="micro">${escapeHtml(activity.session.rootPath)}</span>
+        <span class="pill ${sessionPillClass(activity.session.status)}">${escapeHtml(humanizeSessionStatus(activity.session.status))}</span>
+      </div>
+      <p class="compact-thread-preview">${escapeHtml(truncatePreview(preview, 120))}</p>
+      <span class="micro">Updated ${escapeHtml(timeAgo(activity.lastMessageAt ?? activity.session.updatedAt))}</span>
+    </div>
+  `;
+}
+
+function renderAttentionEventCard(event: DesktopOverviewResponse["overview"]["auditEvents"][number]): string {
+  return `
+    <div class="attention-card">
+      <strong>${escapeHtml(event.type.replace(/_/g, " "))}</strong>
+      <p class="attention-copy">${escapeHtml(event.detail ?? "No extra detail recorded.")}</p>
+      <span class="micro">${escapeHtml(timeAgo(event.createdAt))}</span>
+    </div>
+  `;
+}
+
+function renderWorkspaceContextCard(root: string): string {
+  return `
+    <div class="workspace-card">
+      <strong>Approved root</strong>
+      <p class="workspace-copy">Freedom can plan and execute against this workspace from desktop and companion surfaces.</p>
+      <code>${escapeHtml(root)}</code>
+    </div>
+  `;
+}
+
 function renderSessionCard(activity: RecentSessionActivity): string {
   const { session, latestUserMessage, latestAssistantMessage, lastMessageAt } = activity;
   const assistantPreview = session.lastError
     ? `Latest run stopped with an error: ${session.lastError}`
-    : latestAssistantMessage?.content?.trim()
+      : latestAssistantMessage?.content?.trim()
       ? latestAssistantMessage.content
       : session.status === "running" || session.status === "queued"
-        ? "Codex is working on the latest turn."
+        ? `${FREEDOM_PRODUCT_NAME} is working on the latest turn.`
         : "No assistant reply has landed yet.";
   return `
     <div class="list-card chat-activity">
@@ -1251,7 +2440,7 @@ function renderSessionCard(activity: RecentSessionActivity): string {
       </div>
       <div class="message-stack">
         ${renderMessagePreview("Phone asked", latestUserMessage, "No user prompt has been captured yet.", "user")}
-        ${renderMessagePreview("Codex replied", assistantPreview, "No assistant reply has landed yet.", "assistant")}
+        ${renderMessagePreview(`${FREEDOM_PRODUCT_NAME} replied`, assistantPreview, "No assistant reply has landed yet.", "assistant")}
       </div>
       ${
         session.lastError
@@ -1303,24 +2492,33 @@ function resolvePublicBaseUrl(req: IncomingMessage, overview: GatewayOverview): 
     return stripTrailingSlash(suggestedUrl);
   }
 
+  return resolveLocalBaseUrl(req);
+}
+
+function resolveLocalBaseUrl(req: IncomingMessage): string {
   const hostHeader = req.headers.host ?? "127.0.0.1:43111";
   return `http://${stripTrailingSlash(hostHeader)}`;
 }
 
+function isLoopbackRequest(req: IncomingMessage): boolean {
+  const remoteAddress = req.socket.remoteAddress ?? "";
+  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress);
+}
+
 function humanizeAuth(value: string): string {
   if (value === "logged_in") {
-    return "Codex ready";
+    return "Freedom ready";
   }
   if (value === "error") {
-    return "Codex needs attention";
+    return "Freedom needs attention";
   }
-  return "Codex login required";
+  return "Freedom login required";
 }
 
 function humanizeAvailability(value: string): string {
   switch (value) {
     case "codex_unavailable":
-      return "Codex unavailable";
+      return "Freedom unavailable";
     case "offline":
       return "Desktop offline";
     case "ready":

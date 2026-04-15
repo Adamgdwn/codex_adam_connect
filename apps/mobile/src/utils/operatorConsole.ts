@@ -1,6 +1,7 @@
 import type { ChatMessage, ChatMessageStatus, ChatSession, InputMode } from "@adam-connect/shared";
+import { FREEDOM_PRODUCT_NAME, FREEDOM_PRIMARY_SESSION_TITLE, isPrimaryFreedomSessionTitle } from "@adam-connect/shared";
 
-export const OPERATOR_SESSION_TITLE = "Operator";
+export const OPERATOR_SESSION_TITLE = FREEDOM_PRIMARY_SESSION_TITLE;
 
 const RISKY_VOICE_PATTERNS = [
   /\brm\s+-rf\b/i,
@@ -15,7 +16,7 @@ const RISKY_VOICE_PATTERNS = [
 ];
 
 export function isOperatorSession(session: ChatSession): boolean {
-  return session.title.trim().toLowerCase() === OPERATOR_SESSION_TITLE.toLowerCase();
+  return session.kind === "operator" || isPrimaryFreedomSessionTitle(session.title);
 }
 
 export function findOperatorSession(sessions: ChatSession[]): ChatSession | undefined {
@@ -161,7 +162,7 @@ export function humanizeMessageRole(message: ChatMessage): string {
     return "You";
   }
   if (message.role === "assistant") {
-    return "Codex";
+    return FREEDOM_PRODUCT_NAME;
   }
   return "System";
 }

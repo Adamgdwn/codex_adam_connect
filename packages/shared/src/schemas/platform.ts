@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FREEDOM_PRODUCT_NAME } from "../freedom.js";
 
 export const hostAuthStatusSchema = z.enum(["logged_in", "logged_out", "error"]);
 export const chatSessionStatusSchema = z.enum(["idle", "queued", "running", "stopping", "error"]);
@@ -17,6 +18,7 @@ export const hostAvailabilitySchema = z.enum([
 export const repairStateSchema = z.enum(["healthy", "reconnecting", "repair_required", "repaired"]);
 export const runStateSchema = z.enum(["ready", "listening", "review", "sending", "running", "stopping", "speaking", "completed", "failed"]);
 export const sessionKindSchema = z.enum(["operator", "project", "admin", "build", "notes"]);
+export const sessionOriginSurfaceSchema = z.enum(["desktop_shell", "mobile_companion"]);
 export const responseStyleSchema = z.enum(["natural", "executive", "technical", "concise"]);
 export const notificationEventSchema = z.enum(["run_complete", "run_failed", "repair_needed", "approval_needed"]);
 export const inputModeSchema = z.enum(["text", "voice", "voice_polished"]);
@@ -90,6 +92,15 @@ export const pairedDeviceSchema = z.object({
   lastSeenAt: z.string().datetime()
 });
 
+export const freedomSessionIdentitySchema = z.object({
+  productName: z.literal(FREEDOM_PRODUCT_NAME),
+  assistantName: z.string().min(1),
+  freedomSessionId: z.string().min(1),
+  originSurface: sessionOriginSurfaceSchema,
+  workspaceContext: z.string().nullable(),
+  auditCorrelationId: z.string().min(1)
+});
+
 export const chatSessionSchema = z.object({
   id: z.string().min(1),
   hostId: z.string().min(1),
@@ -101,6 +112,7 @@ export const chatSessionSchema = z.object({
   rootPath: z.string().min(1),
   threadId: z.string().nullable(),
   status: chatSessionStatusSchema,
+  identity: freedomSessionIdentitySchema,
   activeTurnId: z.string().nullable(),
   stopRequested: z.boolean(),
   lastError: z.string().nullable(),
@@ -150,6 +162,8 @@ export const auditEventSchema = z.object({
   deviceId: z.string().nullable(),
   sessionId: z.string().nullable(),
   type: z.string().min(1),
+  originSurface: sessionOriginSurfaceSchema.nullable().optional(),
+  auditCorrelationId: z.string().min(1).nullable().optional(),
   detail: z.string().nullable(),
   createdAt: z.string().datetime()
 });
@@ -205,6 +219,7 @@ export const createSessionRequestSchema = z.object({
   rootPath: z.string().min(1).optional(),
   title: z.string().min(1).optional(),
   kind: sessionKindSchema.optional(),
+  originSurface: sessionOriginSurfaceSchema.optional(),
   starterPrompt: z.string().min(1).max(8000).optional()
 });
 

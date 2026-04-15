@@ -14,6 +14,7 @@ import type {
   WakeControl
 } from "@adam-connect/shared";
 import type { ProjectTemplateId } from "@adam-connect/shared";
+import { FREEDOM_PRIMARY_SESSION_TITLE, FREEDOM_PRODUCT_NAME, FREEDOM_RUNTIME_NAME } from "@adam-connect/shared";
 import { ApiClient } from "../services/api/client";
 import { clearSettings, loadSettings, saveSettings, type StoredSettings } from "../services/storage/settingsStorage";
 import { clearDeviceToken, loadDeviceToken, saveDeviceToken } from "../services/storage/tokenStorage";
@@ -456,7 +457,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         pairingCode: "",
         newSessionRootPath: paired.host.approvedRoots[0] ?? "",
         realtimeConnected: false,
-        notice: "Phone paired. The Operator chat will be ready for quick turns.",
+        notice: `${FREEDOM_PRODUCT_NAME} is paired. Your primary chat will be ready for quick turns.`,
         view: "host"
       });
       syncPushTokenRefresh(baseUrl, paired.deviceToken, get, set);
@@ -636,7 +637,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const intent = get().projectIntent.trim();
 
       if (!intent) {
-        set({ error: "Add a project goal so Codex knows how to kick this chat off." });
+        set({ error: `Add a project goal so ${FREEDOM_PRODUCT_NAME} knows how to kick this chat off.` });
         return;
       }
 
@@ -680,7 +681,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           [session.id]: [...(state.messagesBySession[session.id] ?? []), kickoffMessage]
         },
         view: "chat",
-        notice: "Project kickoff sent. Codex is starting with the new project brief.",
+        notice: `Project kickoff sent. ${FREEDOM_PRODUCT_NAME} is starting with the new project brief.`,
         error: null
       }));
       await get().refresh();
@@ -789,7 +790,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           voiceInterruptRequested = true;
           assistantSpeech.stop();
           set((state) => ({
-            notice: "Codex is still busy, so Adam Connect is stopping the current run and will send your new voice turn next.",
+            notice: `${FREEDOM_PRODUCT_NAME} is still busy, so ${FREEDOM_RUNTIME_NAME} is stopping the current run and will send your new voice turn next.`,
             error: null,
             view: "chat",
             voiceSessionPhase: state.voiceSessionActive ? "interrupted" : state.voiceSessionPhase
@@ -801,8 +802,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({
           notice:
             get().composerInputMode === "voice" && get().autoSendVoice
-              ? "Voice captured. Codex is still busy, so your transcript will send automatically when this run finishes or you tap Stop."
-              : "Codex is still busy with the current run. Your draft is staying in the composer until this run finishes or you tap Stop.",
+              ? `Voice captured. ${FREEDOM_PRODUCT_NAME} is still busy, so your transcript will send automatically when this run finishes or you tap Stop.`
+              : `${FREEDOM_PRODUCT_NAME} is still busy with the current run. Your draft is staying in the composer until this run finishes or you tap Stop.`,
           error: null,
           view: "chat"
         });
@@ -849,7 +850,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
       if (parsedExternalRequest) {
         set({
-          notice: `Adam Connect will prepare an email draft for ${parsedExternalRequest.recipientDestination} after this reply finishes, then wait for your confirmation.`,
+          notice: `${FREEDOM_RUNTIME_NAME} will prepare an email draft for ${parsedExternalRequest.recipientDestination} after this reply finishes, then wait for your confirmation.`,
           error: null
         });
       }
@@ -895,10 +896,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         notice: shouldStopVoiceLoop
           ? isSessionBusy(targetSession)
             ? "Voice loop stopped. Waiting for the desktop to halt the current run."
-            : "Voice loop stopped. Adam Connect is also checking this chat for a stuck or queued run."
+            : `Voice loop stopped. ${FREEDOM_RUNTIME_NAME} is also checking this chat for a stuck or queued run.`
           : isSessionBusy(targetSession)
             ? "Stop requested. Waiting for the desktop to halt the current run."
-            : "Stop requested for recovery. Adam Connect is checking for a stuck or queued run in this chat.",
+            : `Stop requested for recovery. ${FREEDOM_RUNTIME_NAME} is checking for a stuck or queued run in this chat.`,
         error: null
       }));
       await get().refresh();
@@ -1027,7 +1028,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     assistantSpeech.stop();
     const assistantVoiceState = await loadAssistantVoiceState(get().selectedAssistantVoiceId);
     const detail = await tts.describeAvailability();
-    const spoken = tts.speak("This is Adam Connect. If you can hear this, spoken replies are working on this phone.");
+    const spoken = tts.speak(`This is ${FREEDOM_PRODUCT_NAME}. If you can hear this, spoken replies are working on this phone.`);
     set({
       assistantVoices: assistantVoiceState.assistantVoices,
       selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
@@ -1057,7 +1058,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         wakeRequesting: false,
         notice:
           result.status === "awake"
-            ? `${result.targetLabel} is waking up now. Adam Connect will reconnect when the desktop heartbeat comes back.`
+            ? `${result.targetLabel} is waking up now. ${FREEDOM_RUNTIME_NAME} will reconnect when the desktop heartbeat comes back.`
             : `${result.targetLabel} wake result: ${result.status}. ${result.detail ?? "Waiting for the desktop heartbeat."}`,
         error: result.status === "error" ? result.detail ?? "Wake relay reported an error." : null
       });
@@ -1280,7 +1281,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({
-        notice: "Voice loop starting. Speak naturally and Adam Connect will keep listening between turns.",
+        notice: `Voice loop starting. Speak naturally and ${FREEDOM_RUNTIME_NAME} will keep listening between turns.`,
         error: null,
         voiceSessionActive: true,
         voiceMuted: false,
@@ -1315,7 +1316,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         voiceMuted: false,
         notice: pendingVoiceTranscript
-          ? "Microphone live again. Finish your thought, or stay quiet and Adam Connect will send the held turn."
+          ? `Microphone live again. Finish your thought, or stay quiet and ${FREEDOM_RUNTIME_NAME} will send the held turn.`
           : "Microphone live again.",
         error: null,
         voiceSessionPhase: "connecting"
@@ -1335,8 +1336,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       voiceAudioLevel: -2,
       voiceSessionPhase: "muted",
       notice: pendingVoiceTranscript
-        ? "Microphone muted. Adam Connect is holding your unfinished turn until you unmute."
-        : "Microphone muted. Adam Connect will keep speaking, but it will ignore your side until you unmute.",
+        ? `Microphone muted. ${FREEDOM_RUNTIME_NAME} is holding your unfinished turn until you unmute.`
+        : `Microphone muted. ${FREEDOM_RUNTIME_NAME} will keep speaking, but it will ignore your side until you unmute.`,
       error: null
     });
   },
@@ -1356,7 +1357,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedAssistantVoiceId: assistantVoiceState.selectedAssistantVoiceId,
       notice: selectedVoice
         ? `Spoken reply voice set to ${selectedVoice.label}. Use Test Spoken Reply to preview it.`
-        : "Spoken reply voice reset to automatic. Adam Connect will use the phone's default English voice.",
+        : `Spoken reply voice reset to automatic. ${FREEDOM_RUNTIME_NAME} will use the phone's default English voice.`,
       error: null
     });
   },
@@ -1592,7 +1593,7 @@ function wakeControlsEqual(left: WakeControl | null, right: WakeControl | null):
 
 function buildExternalSubject(sessionTitle: string, messageContent: string): string {
   const preview = messageContent.trim().replace(/\s+/g, " ").slice(0, 72).trim();
-  return preview ? `${sessionTitle}: ${preview}` : `${sessionTitle}: Adam Connect update`;
+  return preview ? `${sessionTitle}: ${preview}` : `${sessionTitle}: ${FREEDOM_PRODUCT_NAME} update`;
 }
 
 function resolveExternalDraftRecipientSelection(recipients: OutboundRecipient[], recipientId: string): {
@@ -1967,7 +1968,7 @@ function applyStreamEvent(
           pendingExternalRequest,
           payload.sessionId,
           payload.message.id,
-          currentState.sessions.find((item) => item.id === payload.sessionId)?.title ?? "Operator",
+          currentState.sessions.find((item) => item.id === payload.sessionId)?.title ?? FREEDOM_PRIMARY_SESSION_TITLE,
           payload.message.content
         )
       : null;
@@ -2027,7 +2028,7 @@ function applyStreamEvent(
           : payload.message.role === "assistant" &&
               pendingExternalRequest &&
               (payload.message.status === "failed" || payload.message.status === "interrupted")
-            ? "The assistant reply was interrupted, so Adam Connect did not prepare the email draft."
+            ? `The assistant reply was interrupted, so ${FREEDOM_RUNTIME_NAME} did not prepare the email draft.`
             : state.notice
     };
   });
@@ -2070,7 +2071,8 @@ async function ensureOperatorSession(
   const session = await api.createSession(token, baseUrl, {
     rootPath,
     title: OPERATOR_SESSION_TITLE,
-    kind: "operator"
+    kind: "operator",
+    originSurface: "mobile_companion"
   });
 
   set((state) => ({
@@ -2081,7 +2083,7 @@ async function ensureOperatorSession(
       [session.id]: session.title
     },
     view: "chat",
-    notice: "Operator chat is ready.",
+    notice: `${FREEDOM_PRODUCT_NAME} is ready.`,
     error: null
   }));
 
@@ -2102,7 +2104,7 @@ async function maybeAutoSendVoiceResult(
       voiceInterruptRequested = true;
       assistantSpeech.stop();
       set((state) => ({
-        notice: "Codex is still busy, so Adam Connect is stopping the current run before it sends your new voice turn.",
+        notice: `${FREEDOM_PRODUCT_NAME} is still busy, so ${FREEDOM_RUNTIME_NAME} is stopping the current run before it sends your new voice turn.`,
         error: null,
         view: "chat",
         voiceSessionPhase: state.voiceSessionActive ? "interrupted" : state.voiceSessionPhase
@@ -2112,7 +2114,7 @@ async function maybeAutoSendVoiceResult(
     }
 
     set((state) => ({
-      notice: "Voice captured. Codex is still busy, so your transcript is waiting in the composer until this run finishes or you tap Stop.",
+      notice: `Voice captured. ${FREEDOM_PRODUCT_NAME} is still busy, so your transcript is waiting in the composer until this run finishes or you tap Stop.`,
       error: null,
       view: "chat",
       voiceSessionPhase: state.voiceSessionActive ? "processing" : state.voiceSessionPhase

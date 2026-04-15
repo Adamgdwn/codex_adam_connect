@@ -1,5 +1,6 @@
 import React from "react";
 import { Animated, Easing, Pressable, Text, TextInput, View } from "react-native";
+import { FREEDOM_PRODUCT_NAME, FREEDOM_RUNTIME_NAME } from "@adam-connect/shared";
 import type { ChatMessage } from "@adam-connect/shared";
 import { formatMessageTimestamp, humanizeMessageRole, humanizeMessageStatus, splitMessageContent } from "../utils/operatorConsole";
 import { styles } from "./mobileStyles";
@@ -50,6 +51,35 @@ export function Banner(props: { text: string; tone: "error" | "info" }): React.J
   );
 }
 
+export function RoboticOwlBadge(props: { compact?: boolean }): React.JSX.Element {
+  return (
+    <View style={[styles.owlBadgeShell, props.compact ? styles.owlBadgeShellCompact : null]}>
+      <View style={styles.owlEarRow}>
+        <View style={styles.owlEar} />
+        <View style={styles.owlEar} />
+      </View>
+      <View style={styles.owlHead}>
+        <View style={styles.owlEyeCluster}>
+          <View style={styles.owlEye}>
+            <View style={styles.owlPupil} />
+          </View>
+          <View style={styles.owlEye}>
+            <View style={styles.owlPupil} />
+          </View>
+        </View>
+        <View style={styles.owlBeak} />
+      </View>
+      <View style={styles.owlBody}>
+        <View style={styles.owlChest} />
+      </View>
+      <View style={styles.owlWingRow}>
+        <View style={styles.owlWing} />
+        <View style={styles.owlWing} />
+      </View>
+    </View>
+  );
+}
+
 export function VoiceSessionPanel(props: {
   active: boolean;
   phase: VoiceSessionPhase;
@@ -70,7 +100,7 @@ export function VoiceSessionPanel(props: {
     props.liveTranscript ||
     props.assistantDraft ||
     (props.phase === "muted"
-      ? "Your microphone is muted. Adam Connect can keep speaking, but it will ignore your side until you unmute."
+      ? `Your microphone is muted. ${FREEDOM_RUNTIME_NAME} can keep speaking, but it will ignore your side until you unmute.`
       : props.active
         ? "Waiting for speech..."
         : "Start voice to keep the conversation loop open.");
@@ -170,7 +200,7 @@ export function WorkingBubble(props: { label: string }): React.JSX.Element {
           <Text style={styles.workingGlyph}>☢</Text>
         </Animated.View>
         <View style={styles.workingCopy}>
-          <Text style={styles.messageRole}>Adam Connect Working</Text>
+          <Text style={styles.messageRole}>{FREEDOM_PRODUCT_NAME} Working</Text>
           <Text style={styles.helperText}>{props.label}</Text>
         </View>
       </View>

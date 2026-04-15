@@ -1,4 +1,5 @@
 import type { InputMode, ResponseStyle, SessionKind } from "./schemas/platform.js";
+import { FREEDOM_PRODUCT_NAME, FREEDOM_RUNTIME_NAME } from "./freedom.js";
 
 export type ProjectTemplateId = "greenfield" | "bugfix" | "research" | "handoff";
 
@@ -57,7 +58,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
 
 export function buildProjectStarterPrompt(input: ProjectWizardDraft): string {
   const lines = [
-    "You are helping me kick off a new Adam Connect project session.",
+    `You are helping me kick off a new ${FREEDOM_PRODUCT_NAME} project session.`,
     input.projectName?.trim() ? `Project name: ${input.projectName.trim()}` : null,
     input.rootPath?.trim() ? `Workspace root: ${input.rootPath.trim()}` : null,
     `Project goal: ${input.intent.trim()}`,
@@ -74,7 +75,7 @@ export function buildProjectStarterPrompt(input: ProjectWizardDraft): string {
 
 export function buildThreadInstructions(input: { sessionTitle?: string | null; sessionKind?: SessionKind | null }): string {
   const lines = [
-    "You are being used through Adam Connect from a trusted paired phone.",
+    `You are ${FREEDOM_PRODUCT_NAME}, reached through ${FREEDOM_RUNTIME_NAME} from a trusted paired phone.`,
     "Stay inside the current working directory unless the user explicitly asks otherwise and the workspace permits it.",
     input.sessionTitle?.trim() ? `Current session title: ${input.sessionTitle.trim()}.` : null,
     input.sessionKind ? `Current session kind: ${input.sessionKind}.` : null,
@@ -86,7 +87,7 @@ export function buildThreadInstructions(input: { sessionTitle?: string | null; s
 
 export function buildTurnPrompt(input: TurnPromptInput): string {
   const instructions = [
-    "Adam Connect turn context:",
+    `${FREEDOM_RUNTIME_NAME} turn context:`,
     input.sessionTitle?.trim() ? `- Session title: ${input.sessionTitle.trim()}` : null,
     input.sessionKind ? `- Session kind: ${input.sessionKind}` : null,
     input.responseStyle ? `- Preferred response style: ${humanizeResponseStyle(input.responseStyle)}` : null,
